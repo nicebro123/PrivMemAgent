@@ -6,11 +6,6 @@ ENV/
 
 # Large data files
 evaluation/results/*
-checkpoints/
-evaluation/mem0_runtime/
-mem0_runtime/
-wandb/
-runs/
 
 # Environment variable files
 .env
@@ -73,9 +68,6 @@ coverage.xml
 # Jupyter Notebook
 .ipynb_checkpoints
 test*.ipynb
-test*.py
-!tests/
-!tests/test_*.py
 
 # IPython
 profile_default/
@@ -143,6 +135,12 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# Local privacy stores and generated keys
+*.db
+*.db-shm
+*.db-wal
+*.key
 
 # Temporary files
 *.tmp

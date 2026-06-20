@@ -1,56 +1,101 @@
-import re
-import os
+import hashlib
 import logging
+import os
+import re
 import traceback
-from typing import Dict, Any, Optional
+from pathlib import Path
+from typing import Any, Dict, Iterable, Mapping, Tuple
 
-import yaml
 import json_repair
+import yaml
+from openai import OpenAI
 from tenacity import (
+    before_sleep_log,
     retry,
     retry_if_exception_type,
     stop_after_attempt,
     wait_random_exponential,
-    before_sleep_log,
 )
-from openai import OpenAI
-
 
 logger = logging.getLogger(__name__)
+_EVALUATION_DIR = Path(__file__).resolve().parent
+_ENVIRONMENT_OVERRIDES = {
+    "openai_base_url": "OPENAI_BASE_URL",
+    "openai_api_key": "OPENAI_API_KEY",
+}
+_SECTION_ENVIRONMENT_OVERRIDES = {
+    ("memobase", "project_url"): "MEMOBASE_PROJECT_URL",
+    ("memobase", "api_key"): "MEMOBASE_API_KEY",
+}
+_ENVIRONMENT_REFERENCE = re.compile(r"^\$(?:\{(?P<braced>[A-Z_][A-Z0-9_]*)\}|(?P<plain>[A-Z_][A-Z0-9_]*))$")
 
 
-def _expand_env(value):
-    if isinstance(value, dict):
-        return {key: _expand_env(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_expand_env(item) for item in value]
-    if isinstance(value, str) and value.startswith("$"):
-        return os.environ.get(value[1:], "")
-    return value
+def _resolve_evaluation_path(path: str) -> Path:
+    candidate = Path(path).expanduser()
+    if candidate.is_absolute():
+        return candidate
+    if candidate.exists():
+        return candidate.resolve()
+    return (_EVALUATION_DIR / candidate).resolve()
+
+
+def _resolve_environment_reference(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    match = _ENVIRONMENT_REFERENCE.fullmatch(value.strip())
+    if not match:
+        return value
+    return os.getenv(match.group("braced") or match.group("plain"), "")
+
+
+def file_sha256(path: str) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _load_config(config_path: str = "eval_config.yaml") -> Dict[str, Any]:
-    with open(config_path, "r", encoding="utf-8") as f:
-        return _expand_env(yaml.safe_load(f))
+    resolved = _resolve_evaluation_path(config_path)
+    with resolved.open("r", encoding="utf-8") as f:
+        config = yaml.safe_load(f) or {}
+    for config_key in _ENVIRONMENT_OVERRIDES:
+        config[config_key] = _resolve_environment_reference(config.get(config_key, ""))
+    for section, config_key in _SECTION_ENVIRONMENT_OVERRIDES:
+        section_config = config.setdefault(section, {})
+        section_config[config_key] = _resolve_environment_reference(
+            section_config.get(config_key, "")
+        )
+    for config_key, environment_key in _ENVIRONMENT_OVERRIDES.items():
+        environment_value = os.getenv(environment_key)
+        if environment_value:
+            config[config_key] = environment_value
+    for (section, config_key), environment_key in _SECTION_ENVIRONMENT_OVERRIDES.items():
+        environment_value = os.getenv(environment_key)
+        if environment_value:
+            config.setdefault(section, {})[config_key] = environment_value
+    config["_config_dir"] = str(resolved.parent)
+    return config
 
 
 def _load_prompt(prompt_path: str) -> str:
-    with open(prompt_path, "r", encoding="utf-8") as f:
+    with _resolve_evaluation_path(prompt_path).open("r", encoding="utf-8") as f:
         return f.read()
 
 
 # ---------------------------------------------------------------------------
 # Module-level cache: config and OpenAI client instances
 # ---------------------------------------------------------------------------
-_CONFIG: Optional[Dict[str, Any]] = None
-_CLIENTS: Dict[str, OpenAI] = {}          # key = (base_url, api_key)
+_CONFIGS: Dict[str, Dict[str, Any]] = {}
+_CLIENTS: Dict[Tuple[str, str], OpenAI] = {}
 
 
 def _get_config(config_path: str = "eval_config.yaml") -> Dict[str, Any]:
-    global _CONFIG
-    if _CONFIG is None:
-        _CONFIG = _load_config(config_path)
-    return _CONFIG
+    resolved = str(_resolve_evaluation_path(config_path))
+    if resolved not in _CONFIGS:
+        _CONFIGS[resolved] = _load_config(resolved)
+    return _CONFIGS[resolved]
 
 
 def _get_client(base_url: str, api_key: str) -> OpenAI:
@@ -106,6 +151,7 @@ def _resolve_llm_params(
 # ---------------------------------------------------------------------------
 # Core function
 # ---------------------------------------------------------------------------
+
 
 def call_llm(
     query: str,
@@ -170,8 +216,11 @@ def call_llm(
             request_kwargs["timeout"] = params["timeout"]
 
         response = client.chat.completions.create(**request_kwargs)
-        content: str = response.choices[0].message.content.strip()
-        logger.debug(f"[{llm_type}] API response content: {content}")
+        raw_content = response.choices[0].message.content
+        if not raw_content:
+            raise ValueError(f"{llm_type} returned empty content")
+        content: str = raw_content.strip()
+        logger.debug("[%s] API response received (%s chars)", llm_type, len(content))
 
         # Strip possible <think>...</think> blocks
         content = re.sub(
@@ -189,25 +238,18 @@ def call_llm(
     if return_parsed_json:
         try:
             repaired = json_repair.loads(content)
-            assert isinstance(repaired, (dict, list)), \
-                "Parsed JSON must be a dict or list"
+            if not isinstance(repaired, (dict, list)):
+                raise ValueError("Parsed JSON must be a dict or list")
         except Exception as e:
-            logger.error(
-                f"Failed to parse JSON: {e}, {traceback.format_exc()}"
-            )
-            raise ValueError(
-                f"Failed to parse JSON from content: {content[:200]}..."
-            )
+            logger.error(f"Failed to parse JSON: {e}, {traceback.format_exc()}")
+            raise ValueError(f"Failed to parse JSON from content: {content[:200]}...") from e
         return repaired
 
     return content
 
 
-def verify_mcq_answer(
-    response: str,
-    answer: str
-) -> bool:
-    pattern = re.compile(r'^[\(<{]?([abcd])[\)>}]?$', re.IGNORECASE)
+def verify_mcq_answer(response: str, answer: str) -> Tuple[bool, bool]:
+    pattern = re.compile(r"^[\(<{]?([abcd])[\)>}]?$", re.IGNORECASE)
 
     r_match = pattern.match(response.strip())
     a_match = pattern.match(answer.strip())
@@ -216,6 +258,37 @@ def verify_mcq_answer(
         return False, False
 
     return r_match.group(1).lower() == a_match.group(1).lower(), True
+
+
+def summarize_scores_by_question_type(records: Iterable[Mapping[str, Any]]) -> Dict[str, Dict]:
+    grouped: Dict[str, Dict[str, float]] = {}
+    for record in records:
+        question_type = str(record.get("question_type") or "Unknown")
+        summary = grouped.setdefault(
+            question_type,
+            {
+                "total_score": 0.0,
+                "total_valid": 0,
+                "total_num": 0,
+            },
+        )
+        summary["total_score"] += float(record.get("score", 0.0))
+        summary["total_valid"] += int(bool(record.get("is_valid", False)))
+        summary["total_num"] += 1
+
+    results = {}
+    for question_type, summary in sorted(grouped.items()):
+        total_num = int(summary["total_num"])
+        total_valid = int(summary["total_valid"])
+        total_score = summary["total_score"]
+        results[question_type] = {
+            "total_score": total_score,
+            "total_valid": total_valid,
+            "total_num": total_num,
+            "accuracy": total_score / total_num if total_num else 0.0,
+            "accuracy_valid": total_score / total_valid if total_valid else 0.0,
+        }
+    return results
 
 
 if __name__ == "__main__":

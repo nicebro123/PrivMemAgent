@@ -1,1 +1,1 @@
-"""Evaluation pipelines for PrivMemAgent."""
+"""Evaluation runners and metrics for MemPrivacy."""

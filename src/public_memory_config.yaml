@@ -1,0 +1,26 @@
+public_memory:
+  mode: minimal_sufficient_rule_baseline
+  policy_version: minimal-public-v1
+  policy:
+    pl2: public_abstract
+    pl3: local_only
+    pl4: drop
+  alias_scope:
+    pl2: task
+    pl3: session
+    pl4: turn
+  type_overrides: {}
+  selector:
+    utility_floor: 0.75
+    max_leakage: 0.35
+    max_public_tokens: 128
+  context_minimizer:
+    enabled: true
+    target_public_ratio: 0.65
+    max_public_tokens: 128
+    min_public_tokens: 8
+  leakage_budget:
+    exact_recovery: 0.01
+    cross_scope_linkability: 0.01
+    pl4_public_retention: 0.0
+    minimum_token_reduction: 0.30
