@@ -1,5 +1,5 @@
-openai_base_url: ""
-openai_api_key: ""
+openai_base_url: "$OPENAI_BASE_URL"
+openai_api_key: "$OPENAI_API_KEY"
 
 embedding_model: 
   model: "text-embedding-3-small"
@@ -34,10 +34,21 @@ judgment_llm:
   wait_time_upper: 60
 
 privacy_llm:
-  base_url: ""
-  api_key: ""
-  model: ""
+  base_url: "$OPENAI_BASE_URL"
+  api_key: "$OPENAI_API_KEY"
+  model: "gpt-4.1-mini"
   max_tokens: 8192
+  temperature: 0.0
+  timeout: 120
+  retry_times: 3
+  wait_time_lower: 10
+  wait_time_upper: 30
+
+attack_llm:
+  base_url: "$OPENAI_BASE_URL"
+  api_key: "$OPENAI_API_KEY"
+  model: "gpt-4.1-mini"
+  max_tokens: 2048
   temperature: 0.0
   timeout: 120
   retry_times: 3
@@ -61,7 +72,7 @@ mem0_config:
 
 memobase:
   project_url: "http://localhost:8019"
-  api_key: "secret"
+  api_key: "$MEMOBASE_API_KEY"
   retry_times: 5
   wait_time_lower: 10
   wait_time_upper: 20

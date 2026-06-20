@@ -20,13 +20,32 @@ logger = logging.getLogger(__name__)
 
 _MODULE_DIR = Path(__file__).resolve().parent
 _ALLOWED_PRIVACY_LEVELS = {"PL2", "PL3", "PL4"}
+_ENVIRONMENT_REFERENCE = re.compile(
+    r"^\$(?:\{(?P<braced>[A-Z_][A-Z0-9_]*)\}|(?P<plain>[A-Z_][A-Z0-9_]*))$"
+)
+
+
+def _expand_environment_references(value):
+    if isinstance(value, dict):
+        return {
+            key: _expand_environment_references(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_expand_environment_references(item) for item in value]
+    if not isinstance(value, str):
+        return value
+    match = _ENVIRONMENT_REFERENCE.fullmatch(value.strip())
+    if not match:
+        return value
+    return os.getenv(match.group("braced") or match.group("plain"), "")
 
 
 def load_yaml_config(config_path: Optional[str] = None) -> dict:
     path = Path(config_path) if config_path else _MODULE_DIR / "privacy_config.yaml"
     path = path.expanduser().resolve()
     with path.open("r", encoding="utf-8") as f:
-        config = yaml.safe_load(f) or {}
+        config = _expand_environment_references(yaml.safe_load(f) or {})
     config["_config_dir"] = str(path.parent)
     return config
 

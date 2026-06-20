@@ -1,0 +1,17 @@
+Judge whether the candidate public memory preserves enough information to answer the downstream question.
+
+Return strict JSON:
+
+{
+  "utility_score": 0.0,
+  "reason": "..."
+}
+
+Question:
+{question}
+
+Reference answer:
+{answer}
+
+Candidate public memory:
+{public_memory}

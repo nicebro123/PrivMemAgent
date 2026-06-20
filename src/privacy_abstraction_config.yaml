@@ -1,0 +1,25 @@
+privacy_abstraction:
+  default_task_family: "general"
+  utility_threshold: 0.85
+  max_candidates_per_turn: 6
+  allowed_levels:
+    PL1: ["L0", "L1", "L2", "L3"]
+    PL2: ["L1", "L2", "L3", "L4", "L5"]
+    PL3: ["L2", "L3", "L4", "L5"]
+    PL4: ["L4", "L5"]
+  type_overrides:
+    Verification Code:
+      allowed_levels: ["L5"]
+      retention: "no_retention"
+    Password:
+      allowed_levels: ["L5"]
+      retention: "no_retention"
+    API Key:
+      allowed_levels: ["L5"]
+      retention: "no_retention"
+    Recovery Code:
+      allowed_levels: ["L5"]
+      retention: "no_retention"
+    Detailed Address:
+      allowed_levels: ["L2", "L3", "L4", "L5"]
+      retention: "local_only"

@@ -1,7 +1,56 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "privmemagent"
 version = "0.1.0"
+description = "Trainable minimal public memory for privacy-preserving edge-cloud agents"
+readme = "README.md"
 requires-python = ">=3.10"
+dependencies = [
+  "cryptography>=44.0,<47.0",
+  "json-repair>=0.55.1,<0.56.0",
+  "openai>=2.15.0,<3.0.0",
+  "pyyaml>=6.0,<7.0",
+  "tenacity>=9.1.2,<10.0.0",
+  "tiktoken>=0.12.0,<0.13.0",
+  "tqdm>=4.67.1,<5.0.0",
+]
+
+[project.optional-dependencies]
+mem0 = [
+  "chromadb>=1.5.2,<2.0.0",
+  "mem0ai>=1.0.5,<2.0.0",
+]
+memory = [
+  "chromadb>=1.5.2,<2.0.0",
+  "langmem>=0.0.30,<0.0.31",
+  "litellm>=1.82.1,<2.0.0",
+  "mem0ai>=1.0.5,<2.0.0",
+  "memobase>=0.0.24,<0.0.40",
+]
+train = [
+  "accelerate>=1.7,<2.0",
+  "datasets>=3.6,<5.0",
+  "peft>=0.15,<1.0",
+  "torch>=2.4",
+  "transformers>=4.52,<5.0",
+  "trl>=0.19,<2.0",
+]
+legacy = [
+  "transformers>=4.52,<5.0",
+  "vllm>=0.9",
+]
+dev = [
+  "bandit>=1.8,<2.0",
+  "pytest>=8.3,<10.0",
+  "pytest-cov>=6.0,<8.0",
+  "ruff>=0.11,<1.0",
+]
+
+[tool.setuptools]
+packages = ["src", "evaluation", "training", "tools"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

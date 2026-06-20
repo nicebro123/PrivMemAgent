@@ -6,6 +6,11 @@ ENV/
 
 # Large data files
 evaluation/results/*
+checkpoints/
+evaluation/mem0_runtime/
+mem0_runtime/
+wandb/
+runs/
 
 # Environment variable files
 .env
