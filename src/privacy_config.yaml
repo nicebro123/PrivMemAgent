@@ -1,0 +1,18 @@
+llm:
+  base_url: "$OPENAI_BASE_URL"
+  api_key: "$OPENAI_API_KEY"
+  model: "gpt-4.1-mini"
+  max_tokens: 8192
+  temperature: 0.0
+  timeout: 120
+  retry_times: 3
+  wait_time_lower: 10
+  wait_time_upper: 30
+
+privacy:
+  db_path: "privacy_store.db"
+  prompt_path: "prompts/extract_privacy.txt"
+  mask_levels:
+    - "PL4"
+    - "PL3"
+    # - "PL2"
