@@ -1,18 +1,20 @@
-import json
-import time
+import argparse
 import copy
+import json
+import re
+import time
+from pathlib import Path
+from typing import Callable, Optional
 
-from tqdm import tqdm
+import json_repair
 from openai import OpenAI
-from vllm import LLM, SamplingParams
-from vllm.sampling_params import StructuredOutputsParams
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from tqdm import tqdm
 
-from metric import evaluate_privacy
-from utils import _load_prompt
+from evaluation.metric import evaluate_privacy
+from evaluation.utils import _load_prompt
+from src.privacy_masking import validate_privacy_items
 
-
-privacy_schema = {
+PRIVACY_SCHEMA = {
     "type": "array",
     "items": {
         "type": "object",
@@ -21,152 +23,237 @@ privacy_schema = {
             "privacy_type": {"type": "string"},
             "privacy_level": {
                 "type": "string",
-                "enum": ["PL1", "PL2", "PL3", "PL4"]
-            }
+                "enum": ["PL2", "PL3", "PL4"],
+            },
         },
         "required": ["original_text", "privacy_type", "privacy_level"],
-        "additionalProperties": False
-    }
+        "additionalProperties": False,
+    },
 }
 
-run_mode = 'vllm'   # vllm  gpt_local
-if run_mode == 'vllm':
-    model_name_or_path = "checkpoint-xxx"
-    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
+
+def build_vllm_writer(model_path: str, revision: Optional[str] = None) -> Callable[[str, str], str]:
+    from transformers import AutoTokenizer
+    from vllm import LLM, SamplingParams
+    from vllm.sampling_params import StructuredOutputsParams
+
+    is_local_model = Path(model_path).expanduser().exists()
+    if not is_local_model and not re.fullmatch(r"[0-9a-fA-F]{40}", revision or ""):
+        raise ValueError(
+            "--revision must be an immutable 40-character commit SHA "
+            "when --model is a Hugging Face repository ID"
+        )
+    # Remote model identifiers are accepted only with an immutable commit SHA.
+    tokenizer = AutoTokenizer.from_pretrained(  # nosec B615
+        model_path,
+        revision=revision,
+        local_files_only=is_local_model,
+    )
     sampling_params = SamplingParams(
-        temperature=0.1, 
-        top_p=0.1, 
+        temperature=0.1,
+        top_p=0.1,
         repetition_penalty=1.05,
         max_tokens=6144,
-        structured_outputs=StructuredOutputsParams(json=privacy_schema)
-    ) 
+        structured_outputs=StructuredOutputsParams(json=PRIVACY_SCHEMA),
+    )
     model = LLM(
-        model=model_name_or_path,
-        tensor_parallel_size=1, 
-        pipeline_parallel_size=1, 
-        dtype='float16',
-        gpu_memory_utilization=0.9
-    ) 
+        model=model_path,
+        revision=revision,
+        tensor_parallel_size=1,
+        pipeline_parallel_size=1,
+        dtype="float16",
+        gpu_memory_utilization=0.9,
+    )
 
-input_file = 'test_mem_privacy_annotated_final.jsonl'
-
-def writer(system_prompt,query):
-    if run_mode == 'vllm':
-        messages = [
-            {"role": "user", "content": system_prompt+query}
-        ]
+    def writer(system_prompt: str, query: str) -> str:
         text = tokenizer.apply_chat_template(
-            messages,
+            [{"role": "user", "content": system_prompt + query}],
             tokenize=False,
             add_generation_prompt=True,
-            enable_thinking=False,  # Set to False to strictly disable thinking
+            enable_thinking=False,
         )
-        outputs = model.generate([text], sampling_params)
-        for output in outputs:
-            generated_text = output.outputs[0].text
-        response = generated_text
-        return response.strip()
-    elif run_mode == 'gpt_local':
-        openai_api_key = "EMPTY"
-        openai_api_base = "http://localhost:8000/v1"
+        output = model.generate([text], sampling_params)[0]
+        return output.outputs[0].text.strip()
 
-        client = OpenAI(
-            api_key=openai_api_key,
-            base_url=openai_api_base,
-        )
+    return writer
 
-        chat_response = client.chat.completions.create(
-            model='Qwen3-4B-privacy',
-            messages=[
-                {"role": "user", "content": system_prompt+query}, 
-            ],
+
+def build_openai_writer(model: str, base_url: str, api_key: str) -> Callable[[str, str], str]:
+    client = OpenAI(base_url=base_url, api_key=api_key or "local")
+
+    def writer(system_prompt: str, query: str) -> str:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": system_prompt + query}],
             temperature=0.1,
             top_p=0.1,
-            presence_penalty=1.05
         )
-        return chat_response.choices[0].message.content.strip()
+        content = response.choices[0].message.content
+        if not content:
+            raise ValueError("Privacy model returned empty content")
+        return content.strip()
+
+    return writer
 
 
-false_pred_num = 0
-all_data1 = []
-all_data2 = []
-eval_final = {}
+def run_evaluation(
+    input_path: Path,
+    output_path: Path,
+    metrics_path: Path,
+    writer: Callable[[str, str], str],
+    embedding_client: Optional[OpenAI] = None,
+    embedding_model: str = "text-embedding-3-small",
+) -> None:
+    system_prompt = _load_prompt("prompts/extract_privacy.txt")
+    records = []
+    product_metrics = []
+    mean_metrics = []
+    failures = []
 
-system_prompt = _load_prompt("prompts/extract_privacy.txt")
-
-start = time.time()
-with open(input_file, "r", encoding="utf-8") as f:
-    for line_num, line in enumerate(f, 1):
-        print("line_num: ",line_num,flush=True)
-
-        line = line.strip()
-        if not line:
-            continue
-
-        try:
+    with input_path.open("r", encoding="utf-8") as source:
+        for line_number, line in enumerate(tqdm(source, desc="Users"), 1):
+            if not line.strip():
+                continue
             data = json.loads(line)
-        except json.JSONDecodeError as e:
-            print(f"Skip line {line_num}: JSON decode error -> {e}")
-            continue
-
-        dialogues = data.get("dialogues", [])
-        save={
-            "uuid":data.get("uuid"),
-            "metadata":data.get("metadata"),
-            "dialogues":[],
-            "questions":data.get("questions")
-        }
-        tmp_dialogues=[]
-        for dialogue in tqdm(dialogues):
-            tmp_dialogue=copy.deepcopy(dialogue) 
-            if dialogue.get("role") == "user":
+            saved = {
+                "uuid": data.get("uuid"),
+                "metadata": data.get("metadata"),
+                "dialogues": [],
+                "questions": data.get("questions", []),
+            }
+            real_name = data.get("metadata", {}).get("user_name", "")
+            for message_index, dialogue in enumerate(data.get("dialogues", [])):
+                annotated = copy.deepcopy(dialogue)
                 current_input = {
-                    "role": "user",
-                    "content": dialogue.get("content", "")
+                    "role": dialogue.get("role", "user"),
+                    "content": dialogue.get("content", ""),
                 }
+                reference = validate_privacy_items(
+                    dialogue.get("privacy_info", []),
+                    dialogue_text=current_input["content"],
+                    strict=False,
+                )
                 try:
-                    pred_list_str=writer(system_prompt.format(real_name=data.get("metadata").get("user_name")),json.dumps(current_input, ensure_ascii=False, indent=2))
-                    pred_list = json.loads(pred_list_str)
-                    eval_product=evaluate_privacy([current_input],pred_list,dialogue.get("privacy_info", []),'product')
-                    eval_mean=evaluate_privacy([current_input],pred_list,dialogue.get("privacy_info", []),'mean')
-                    all_data1.append(eval_product)
-                    all_data2.append(eval_mean)
-                    tmp_dialogue["privacy_info_llm"]=pred_list
-                except Exception:
-                    false_pred_num+=1
-                    tmp_dialogue["privacy_info_llm"]=[]
-                
-                eval_final={
-                  "false_pred_num":false_pred_num,
-                  "product":all_data1,
-                  "mean":all_data2
-                }  
-                with open("xxx.json", "w", encoding="utf-8") as f:
-                    json.dump(eval_final, f, ensure_ascii=False, indent=2)
-                
-                tmp_dialogues.append(tmp_dialogue)
-            else:
-                current_input = {
-                    "role": "user",
-                    "content": dialogue.get("content", "")
-                }
-                try:
-                    pred_list_str=writer(system_prompt.format(real_name=data.get("metadata").get("user_name")),json.dumps(current_input, ensure_ascii=False, indent=2))
-                    pred_list = json.loads(pred_list_str)
-                    tmp_dialogue["privacy_info_llm"] = pred_list
-                except Exception:
-                    false_pred_num+=1
-                    tmp_dialogue["privacy_info_llm"] = []
-                tmp_dialogues.append(tmp_dialogue)
+                    raw_prediction = writer(
+                        system_prompt.format(real_name=real_name),
+                        json.dumps(current_input, ensure_ascii=False),
+                    )
+                    prediction = validate_privacy_items(
+                        json_repair.loads(raw_prediction),
+                        dialogue_text=current_input["content"],
+                        strict=True,
+                    )
+                except Exception as exc:
+                    prediction = []
+                    failures.append(
+                        {
+                            "line": line_number,
+                            "message_index": message_index,
+                            "error": str(exc),
+                        }
+                    )
+                annotated["privacy_info_llm"] = prediction
+                product_metrics.append(
+                    evaluate_privacy(
+                        [current_input],
+                        prediction,
+                        reference,
+                        mode="product",
+                        embedding_client=embedding_client,
+                        embedding_model=embedding_model,
+                    )
+                )
+                mean_metrics.append(
+                    evaluate_privacy(
+                        [current_input],
+                        prediction,
+                        reference,
+                        mode="mean",
+                        embedding_client=embedding_client,
+                        embedding_model=embedding_model,
+                    )
+                )
+                saved["dialogues"].append(annotated)
+            records.append(saved)
 
-        save["dialogues"]=tmp_dialogues
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as output:
+        for record in records:
+            output.write(json.dumps(record, ensure_ascii=False) + "\n")
+    metrics_path.parent.mkdir(parents=True, exist_ok=True)
+    metrics_path.write_text(
+        json.dumps(
+            {
+                "false_prediction_count": len(failures),
+                "type_matching": "embedding" if embedding_client else "exact",
+                "embedding_model": embedding_model if embedding_client else None,
+                "failures": failures,
+                "product": product_metrics,
+                "mean": mean_metrics,
+                "product_macro": _macro_average(product_metrics),
+                "mean_macro": _macro_average(mean_metrics),
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
-        with open("xxx.jsonl", "a", encoding="utf-8") as f:
-            f.write(json.dumps(save, ensure_ascii=False) + "\n")
-        
-                
-                
-end = time.time()
-print(f"Total time taken: {end - start:.4f} seconds")
 
-# CUDA_VISIBLE_DEVICES=1 nohup python eval.py >> xxx.log 2>&1 &
+def _macro_average(records: list[dict]) -> dict:
+    if not records:
+        return {"precision": 0.0, "recall": 0.0, "f1": 0.0}
+    return {
+        metric: sum(record["overall"][metric] for record in records) / len(records)
+        for metric in ("precision", "recall", "f1")
+    }
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Evaluate a privacy extractor")
+    parser.add_argument("--input", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--metrics-output", type=Path, required=True)
+    parser.add_argument("--backend", choices=("vllm", "openai"), default="vllm")
+    parser.add_argument("--model", required=True)
+    parser.add_argument(
+        "--revision",
+        help="Immutable Hugging Face commit SHA; required for remote model IDs",
+    )
+    parser.add_argument("--base-url", default="http://127.0.0.1:8000/v1")
+    parser.add_argument("--api-key", default="local")
+    parser.add_argument("--embedding-base-url")
+    parser.add_argument("--embedding-api-key", default="")
+    parser.add_argument("--embedding-model", default="text-embedding-3-small")
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    writer = (
+        build_vllm_writer(args.model, args.revision)
+        if args.backend == "vllm"
+        else build_openai_writer(args.model, args.base_url, args.api_key)
+    )
+    embedding_client = (
+        OpenAI(
+            base_url=args.embedding_base_url,
+            api_key=args.embedding_api_key or "local",
+        )
+        if args.embedding_base_url
+        else None
+    )
+    start = time.time()
+    run_evaluation(
+        args.input.expanduser().resolve(),
+        args.output.expanduser().resolve(),
+        args.metrics_output.expanduser().resolve(),
+        writer,
+        embedding_client=embedding_client,
+        embedding_model=args.embedding_model,
+    )
+    print(f"Completed in {time.time() - start:.2f}s")
+
+
+if __name__ == "__main__":
+    main()

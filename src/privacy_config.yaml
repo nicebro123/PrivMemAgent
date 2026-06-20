@@ -1,7 +1,10 @@
 llm:
-  base_url: "$OPENAI_BASE_URL"
-  api_key: "$OPENAI_API_KEY"
-  model: "gpt-4.1-mini"
+  # Raw dialogue is sent to this detector. A localhost endpoint is required
+  # unless allow_remote is explicitly enabled.
+  base_url: "http://127.0.0.1:8000/v1"
+  api_key: ""
+  model: ""
+  allow_remote: false
   max_tokens: 8192
   temperature: 0.0
   timeout: 120
