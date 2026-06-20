@@ -48,6 +48,17 @@ def _resolve_environment_reference(value: Any) -> Any:
     return os.getenv(match.group("braced") or match.group("plain"), "")
 
 
+def _expand_environment_references(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _expand_environment_references(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_expand_environment_references(item) for item in value]
+    return _resolve_environment_reference(value)
+
+
 def file_sha256(path: str) -> str:
     digest = hashlib.sha256()
     with Path(path).open("rb") as source:
@@ -59,14 +70,7 @@ def file_sha256(path: str) -> str:
 def _load_config(config_path: str = "eval_config.yaml") -> Dict[str, Any]:
     resolved = _resolve_evaluation_path(config_path)
     with resolved.open("r", encoding="utf-8") as f:
-        config = yaml.safe_load(f) or {}
-    for config_key in _ENVIRONMENT_OVERRIDES:
-        config[config_key] = _resolve_environment_reference(config.get(config_key, ""))
-    for section, config_key in _SECTION_ENVIRONMENT_OVERRIDES:
-        section_config = config.setdefault(section, {})
-        section_config[config_key] = _resolve_environment_reference(
-            section_config.get(config_key, "")
-        )
+        config = _expand_environment_references(yaml.safe_load(f) or {})
     for config_key, environment_key in _ENVIRONMENT_OVERRIDES.items():
         environment_value = os.getenv(environment_key)
         if environment_value:

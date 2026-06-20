@@ -23,10 +23,25 @@
 
 PrivMemAgent is a research extension of the **MemPrivacy privacy-preserving
 personalized memory framework** for **edge-cloud agents**. This branch adds
-policy-constrained minimal public memory while retaining MemPrivacy's reversible
-pseudonymization path. The cloud-isolation guarantee applies only when privacy
-detection runs on a trusted local endpoint; remote detection requires explicit
-opt-in and exposes raw input to that provider.
+trainable, policy-constrained minimal public memory while retaining MemPrivacy's
+reversible pseudonymization path. The cloud-isolation guarantee applies only
+when privacy detection runs on a trusted local endpoint; remote detection
+requires explicit opt-in and exposes raw input to that provider.
+
+## Research Architecture
+
+The primary research path is trainable:
+
+- **PMA — Privacy Memory Abstractor** generates task-conditioned public-memory
+  candidates and structured local private residue;
+- **PUC — Privacy-Utility Critic** selects the lowest-leakage candidate that
+  satisfies a downstream utility threshold;
+- **AMA — Adversarial Memory Auditor** evaluates exact reconstruction and
+  sensitive-attribute inference against cloud-visible memory.
+
+The deterministic policy router and minimal-public compiler are retained as a
+safe baseline, CI path, and ablation. They do not replace the trainable PMA
+method.
 
 
 ---
@@ -222,8 +237,11 @@ git clone https://github.com/nicebro123/PrivMemAgent.git
 cd PrivMemAgent
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e ".[dev]"
 ```
+
+Install `.[memory]` for Mem0/LangMem/Memobase evaluation, `.[train]` for
+SFT/DPO, or `.[legacy]` for the retained vLLM extraction workflow.
 
 For local checkpoint evaluation through vLLM on a supported Linux/CUDA host:
 
@@ -317,6 +335,43 @@ The currently released partial files contain 10 annotations whose
 `original_text` is absent from the corresponding message. Production APIs fail
 closed on these records; evaluation wrappers log and skip them.
 
+## Trainable PMA Pipeline
+
+Generate and score policy-valid abstraction candidates:
+
+```bash
+python -m evaluation.build_pma_candidates \
+  --input data/memprivacy_bench_testset.jsonl \
+  --output evaluation/results/pma_candidates.jsonl \
+  --users 10 --task-family recommendation \
+  --backend oracle_prompt --config evaluation/eval_config.yaml
+
+python -m evaluation.score_pma_candidates \
+  --candidates evaluation/results/pma_candidates.jsonl \
+  --output evaluation/results/pma_scores.jsonl \
+  --memory-system mem0 --attack all \
+  --config evaluation/eval_config.yaml
+```
+
+Build training data and run SFT/DPO:
+
+```bash
+python -m evaluation.build_pma_train_data \
+  --candidates evaluation/results/pma_candidates.jsonl \
+  --scores evaluation/results/pma_scores.jsonl \
+  --sft-output evaluation/results/pma_sft.jsonl \
+  --preference-output evaluation/results/pma_preference.jsonl
+
+python -m training.train_pma_sft --train-file evaluation/results/pma_sft.jsonl \
+  --model-name-or-path Qwen/Qwen2.5-1.5B-Instruct \
+  --model-revision '<immutable-commit-sha>' --output-dir checkpoints/pma-sft \
+  --lora --bf16
+```
+
+Use `evaluation.eval_pma_mem0` for the paired raw/masking/PMA experiment and
+`evaluation.compare_pma_results` to reject incomplete or proxy-only paper
+tables. See the PMA development plan below for the full protocol.
+
 ## Compile Minimal Public Memory
 
 The deterministic minimal-sufficient baseline separates cloud-safe public
@@ -407,7 +462,7 @@ You can enforce a masking threshold such as:
 ```bash
 pip install -r requirements-dev.txt
 pytest
-ruff check src evaluation tests tools
+ruff check src evaluation training tests tools
 ```
 
 Development notes:
@@ -416,6 +471,9 @@ Development notes:
 - [Minimal sufficient public memory roadmap](docs/INNOVATION_ROADMAP.md)
 - [Minimal public memory preliminary results](docs/PRELIMINARY_RESULTS.md)
 - [Memory evaluation runbook](docs/MEMORY_EVAL_RUNBOOK.md)
+- [PMA code development plan](docs/pma_code_development_plan.md)
+- [Trainable privacy memory abstractor](docs/trainable_privacy_memory_abstractor.md)
+- [Paper concept and experiment design](docs/paper_concept_pma.md)
 
 ---
 
