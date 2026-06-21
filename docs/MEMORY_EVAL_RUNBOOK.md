@@ -1,5 +1,49 @@
 # Memory Evaluation Runbook
 
+
+## Repository, Assets, and Runtime Configs
+
+Keep the tracked repo code-only where possible. Small sample JSONL files and
+tracked YAML profiles are fine; large model weights, generated runtime configs,
+local privacy stores, and experiment outputs should stay outside git or under
+ignored paths. This mirrors the EvoCo-RAG workflow: tracked profiles describe
+the reusable experiment intent, and generated runtime configs freeze one
+server/run.
+
+Recommended local layout:
+
+```text
+parent/
+├── PrivMemAgent/
+└── memprivate_assets/
+    ├── models/bge-m3/
+    ├── runtime_configs/
+    └── results/
+```
+
+Generate a runtime config instead of editing tracked profiles for each machine:
+
+```bash
+python -m tools.materialize_eval_config \
+  --profile evaluation/eval_config.deepseek.yaml \
+  --output ../memprivate_assets/runtime_configs/deepseek_cuda0.yaml \
+  --embedding-model ../memprivate_assets/models/bge-m3 \
+  --embedding-device cuda:0 \
+  --output-path ../memprivate_assets/results/deepseek_cuda0 \
+  --print-export
+
+export MEMPRIVACY_EVAL_CONFIG="$PWD/../memprivate_assets/runtime_configs/deepseek_cuda0.yaml"
+```
+
+`tools.materialize_eval_config` supports repeatable dotted-key overrides such
+as `--set answer_llm.model=deepseek-v4-flash`. It refuses literal secret values
+for keys such as `api_key`, `token`, and `password`; store credentials in an env
+file and keep tracked YAML values as `$OPENAI_API_KEY` style references.
+
+Memory runners resolve `output_path` from the selected config. Prefer absolute
+result roots, or let the materializer convert `--output-path` to an absolute
+path, so generated configs can move without changing where results are written.
+
 ## Environment
 
 Use Python 3.10 or newer and install the complete evaluation dependencies:
@@ -34,8 +78,15 @@ runtime-only environment file and selecting the DeepSeek config profile:
 
 ```bash
 source ~/.config/memprivate/deepseek.env
-export MEMPRIVACY_EVAL_CONFIG=evaluation/eval_config.deepseek.yaml
-python -m tools.preflight_memory_eval --system langmem --probe-openai
+python -m tools.materialize_eval_config \
+  --profile evaluation/eval_config.deepseek.yaml \
+  --output evaluation/runtime_configs/eval_config.deepseek.cuda0.yaml \
+  --embedding-model /mnt/infini-data/test/quan_space/codespace/memprivate/models/bge-m3 \
+  --embedding-device cuda:0 \
+  --output-path evaluation/results \
+  --print-export
+export MEMPRIVACY_EVAL_CONFIG="$PWD/evaluation/runtime_configs/eval_config.deepseek.cuda0.yaml"
+python -m tools.preflight_memory_eval --config "$MEMPRIVACY_EVAL_CONFIG" --system langmem --probe-openai
 ```
 
 The key file must stay outside git and mode `0600`. DeepSeek official chat

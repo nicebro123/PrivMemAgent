@@ -31,6 +31,41 @@ opt-in and exposes raw input to that provider.
 
 ---
 
+## Reproducibility Layout
+
+Following the same code/assets separation used by
+[nicebro123/EvoCo-RAG](https://github.com/nicebro123/EvoCo-RAG), keep this Git
+repository focused on code, tracked config profiles, small sample data, tests,
+and documentation. Large or machine-specific assets should live outside git.
+
+```text
+parent/
+├── PrivMemAgent/          # this repo: code, configs, scripts, docs, tests
+└── memprivate_assets/     # not committed: model weights, runtime configs, outputs
+    ├── models/
+    │   └── bge-m3/
+    ├── runtime_configs/
+    ├── results/
+    └── logs/
+```
+
+On the current H20 server we use the equivalent shared asset root:
+
+```text
+/mnt/infini-data/test/quan_space/codespace/memprivate/
+├── PrivMemAgent/
+├── models/bge-m3/
+└── PrivMemAgent/evaluation/runtime_configs/   # ignored local runtime YAMLs
+```
+
+The normal reproduction path is:
+
+```text
+clone/update repo -> create env -> configure provider keys -> download local embedding -> materialize runtime config -> smoke test -> user-limited experiment -> audit results
+```
+
+---
+
 ## Why MemPrivacy?
 
 Cloud agents typically send user messages to remote LLMs and store conversation traces in memory systems (e.g., **Mem0**, **LangMem**, **Memobase**) for long-term personalization. This creates a large privacy attack surface:
@@ -220,15 +255,38 @@ MemPrivacy/
 ```bash
 git clone https://github.com/nicebro123/PrivMemAgent.git
 cd PrivMemAgent
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+
+conda create -n memprivate python=3.11 -y
+conda activate memprivate
+pip install -U pip
+pip install -r requirements-dev.txt
 ```
 
-For local checkpoint evaluation through vLLM on a supported Linux/CUDA host:
+A plain virtual environment also works if you are not on a shared GPU server:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+```
+
+For local detector checkpoint evaluation through vLLM on a supported Linux/CUDA
+host, install the additional vLLM requirements after the base environment:
 
 ```bash
 pip install -r requirements-vllm.txt
+```
+
+Verify CUDA before running local embeddings on a GPU:
+
+```bash
+python - <<'PY'
+import torch
+print("torch:", torch.__version__, "cuda:", torch.version.cuda)
+print("cuda available:", torch.cuda.is_available())
+for i in range(torch.cuda.device_count()):
+    print(i, torch.cuda.get_device_name(i))
+PY
 ```
 
 ### 2) Configuration
@@ -249,6 +307,168 @@ This file configures the benchmarking suite across different memory systems (Mem
 - **System Configs**: Database paths and connection URLs for specific memory systems (e.g., `mem0_config`, `memobase`).
 
 ---
+
+
+### 3) Experiment Profiles and Runtime Configs
+
+Tracked evaluation profiles live under `evaluation/` and contain only reusable,
+non-secret defaults:
+
+- `evaluation/eval_config.yaml`: default OpenAI-compatible profile.
+- `evaluation/eval_config.deepseek.yaml`: DeepSeek official API for chat plus
+  local BGE-M3 embeddings.
+
+Do not commit API keys, generated runtime configs, model weights, or experiment
+outputs. Put provider credentials in a shell env file outside the repo, for
+example:
+
+```bash
+mkdir -p ~/.config/memprivate
+chmod 700 ~/.config/memprivate
+cat > ~/.config/memprivate/deepseek.env <<'EOF'
+export OPENAI_BASE_URL="https://api.deepseek.com/v1"
+export OPENAI_API_KEY="replace-with-your-key"
+EOF
+chmod 600 ~/.config/memprivate/deepseek.env
+source ~/.config/memprivate/deepseek.env
+```
+
+Then materialize a machine-specific runtime YAML. This is the PrivMemAgent
+equivalent of EvoCo-RAG's generated per-run `run_config.yaml`: it freezes the
+provider profile, local embedding path, GPU choice, and result root for one
+server/run, while staying outside git.
+
+```bash
+python -m tools.materialize_eval_config \
+  --profile evaluation/eval_config.deepseek.yaml \
+  --output evaluation/runtime_configs/eval_config.deepseek.cuda0.yaml \
+  --embedding-model /mnt/infini-data/test/quan_space/codespace/memprivate/models/bge-m3 \
+  --embedding-device cuda:0 \
+  --output-path evaluation/results \
+  --print-export
+
+export MEMPRIVACY_EVAL_CONFIG="$PWD/evaluation/runtime_configs/eval_config.deepseek.cuda0.yaml"
+```
+
+The memory runners resolve `output_path` from the selected config. The
+materializer stores `--output-path` as an absolute path so moving the runtime
+YAML does not accidentally redirect outputs under `evaluation/runtime_configs/`.
+
+To switch large-model providers later, copy or add another tracked profile such
+as `evaluation/eval_config.openai.yaml` or `evaluation/eval_config.local.yaml`,
+keep secrets as environment references, and materialize a new runtime config:
+
+```bash
+python -m tools.materialize_eval_config \
+  --profile evaluation/eval_config.deepseek.yaml \
+  --output ../memprivate_assets/runtime_configs/deepseek_v4_flash_cuda0.yaml \
+  --set memory_llm.model=deepseek-v4-flash \
+  --set answer_llm.model=deepseek-v4-flash \
+  --set judgment_llm.model=deepseek-v4-pro \
+  --embedding-device cuda:0 \
+  --output-path ../memprivate_assets/results/deepseek_v4_flash
+```
+
+Use `--set dotted.key=value` for non-secret per-run overrides. Literal secrets
+are rejected by default; use `$ENV_VAR` references instead.
+
+### 4) DeepSeek + Local BGE Smoke Test
+
+DeepSeek supplies the OpenAI-compatible chat/reasoning model roles
+(`memory_llm`, `answer_llm`, and `judgment_llm`). BGE-M3 runs locally as the
+embedding model, so user memory text does not need to be sent to a remote
+embedding endpoint. The BGE checkpoint should be downloaded outside git, for
+example with ModelScope or Hugging Face:
+
+```bash
+# Example expected path on the H20 server
+test -d /mnt/infini-data/test/quan_space/codespace/memprivate/models/bge-m3
+```
+
+Run preflight before spending API/GPU time:
+
+```bash
+source ~/.config/memprivate/deepseek.env
+export MEMPRIVACY_EVAL_CONFIG="$PWD/evaluation/runtime_configs/eval_config.deepseek.cuda0.yaml"
+python -m tools.preflight_memory_eval \
+  --config "$MEMPRIVACY_EVAL_CONFIG" \
+  --system mem0 \
+  --system langmem \
+  --no-probe-openai
+```
+
+Compile a tiny cloud-safe public-memory artifact:
+
+```bash
+python -m evaluation.eval_public_memory \
+  --input data/memory_eval_smoke.jsonl \
+  --output evaluation/results/smoke_deepseek_bge_public_records.jsonl \
+  --metrics-output evaluation/results/smoke_deepseek_bge_public_metrics.json \
+  --state-dir evaluation/results/smoke_deepseek_bge_public_state \
+  --cloud-safe-dataset-output evaluation/results/smoke_deepseek_bge_public_benchmark.jsonl \
+  --annotation-source oracle \
+  --minimum-token-reduction -1.0
+```
+
+Audit the generated cloud-safe artifacts:
+
+```bash
+python -m tools.adversarial_audit \
+  --source data/memory_eval_smoke.jsonl \
+  --artifact evaluation/results/smoke_deepseek_bge_public_records.jsonl \
+  --artifact evaluation/results/smoke_deepseek_bge_public_benchmark.jsonl \
+  --report evaluation/results/smoke_deepseek_bge_adversarial_audit.json
+```
+
+Run one-user Mem0 and LangMem smoke checks on the cloud-safe benchmark:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python -m evaluation.eval_mem0 \
+  --input evaluation/results/smoke_deepseek_bge_public_benchmark.jsonl \
+  --no-mask --mcq --user-num 1 --num-workers 1
+
+CUDA_VISIBLE_DEVICES=0 python -m evaluation.eval_langmem \
+  --input evaluation/results/smoke_deepseek_bge_public_benchmark.jsonl \
+  --no-mask --mcq --user-num 1 --num-workers 1
+```
+
+### 5) User-Limited PersonaMem-v2 Run
+
+After smoke passes, run a small reproducibility experiment before launching a
+full matrix. The following commands use 5 users and GPU 0 for local embeddings:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python -m evaluation.eval_public_memory \
+  --input data/personamem_v2_testset.jsonl \
+  --output evaluation/results/user5_deepseek_bge/persona_public_records.jsonl \
+  --metrics-output evaluation/results/user5_deepseek_bge/persona_public_metrics.json \
+  --state-dir evaluation/results/user5_deepseek_bge/persona_public_state \
+  --cloud-safe-dataset-output evaluation/results/user5_deepseek_bge/persona_public_benchmark.jsonl \
+  --annotation-source oracle \
+  --user-limit 5 \
+  --minimum-token-reduction -1.0
+
+python -m tools.adversarial_audit \
+  --source data/personamem_v2_testset.jsonl \
+  --source-user-limit 5 \
+  --artifact evaluation/results/user5_deepseek_bge/persona_public_records.jsonl \
+  --artifact evaluation/results/user5_deepseek_bge/persona_public_benchmark.jsonl \
+  --report evaluation/results/user5_deepseek_bge/persona_public_adversarial_audit.json
+
+CUDA_VISIBLE_DEVICES=0 python -m evaluation.eval_mem0 \
+  --input evaluation/results/user5_deepseek_bge/persona_public_benchmark.jsonl \
+  --no-mask --mcq --user-num 5 --num-workers 1
+
+CUDA_VISIBLE_DEVICES=0 python -m evaluation.eval_langmem \
+  --input evaluation/results/user5_deepseek_bge/persona_public_benchmark.jsonl \
+  --no-mask --mcq --user-num 5 --num-workers 1
+```
+
+A complete run should leave public-memory metrics, adversarial-audit reports,
+and memory-system result JSON files under the selected `output_path`. Treat
+`adversarial_audit.passed == true` and zero direct leakage failures as the gate
+before sending artifacts to a cloud memory backend.
+
 
 ## Evaluate The Privacy Extractor
 
@@ -312,6 +532,8 @@ Add `--system memobase` only when a Memobase server is reachable. Configuration
 files may reference secrets as `$OPENAI_BASE_URL`, `$OPENAI_API_KEY`,
 `$MEMOBASE_PROJECT_URL`, and `$MEMOBASE_API_KEY`; unresolved references fail
 preflight instead of being treated as literal credentials.
+
+
 
 The currently released partial files contain 10 annotations whose
 `original_text` is absent from the corresponding message. Production APIs fail
