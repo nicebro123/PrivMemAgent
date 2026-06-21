@@ -506,6 +506,20 @@ source ~/.config/memprivate/deepseek.env
 CUDA_VISIBLE_DEVICES=0 python -m tools.run_memprivacy4b_memory_workflow   --mode full
 ```
 
+Run the full released PersonaMem-v2 and MemPrivacy-Bench workflows across four
+single-GPU extractor shards on GPUs 0, 1, 2, and 3:
+
+```bash
+source ~/.config/memprivate/deepseek.env
+python -m tools.launch_memprivacy4b_full_experiments --gpus 0,1,2,3
+```
+
+The multi-GPU launcher splits each JSONL by user across the requested GPUs,
+runs one MemPrivacy-4B-RL vLLM extractor process per GPU, merges the shard
+predictions, then runs public-memory compilation and adversarial audit once per
+dataset. Use `--dry-run` first to print commands and log paths without starting
+work.
+
 Each mode performs:
 
 ```text

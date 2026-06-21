@@ -125,6 +125,25 @@ source ~/.config/memprivate/deepseek.env
 CUDA_VISIBLE_DEVICES=0 python -m tools.run_memprivacy4b_memory_workflow --mode full
 ```
 
+For the full released PersonaMem-v2 plus MemPrivacy-Bench experiment set, use
+the multi-GPU launcher. It uses GPUs 0, 1, 2, and 3 by default, shards each
+dataset by user, starts one MemPrivacy-4B-RL extractor process per GPU, merges
+the predictions, and then runs public-memory compilation and adversarial audit
+once per dataset:
+
+```bash
+source ~/.config/memprivate/deepseek.env
+python -m tools.launch_memprivacy4b_full_experiments --gpus 0,1,2,3 --dry-run
+python -m tools.launch_memprivacy4b_full_experiments --gpus 0,1,2,3
+```
+
+Outputs are grouped under `evaluation/results/memprivacy4b_full/<dataset>/`,
+including `shards/`, `extractor_shards/`, per-shard logs, merged
+`predictions.jsonl`, `public_records.jsonl`, `public_benchmark.jsonl`,
+`public_metrics.json`, `adversarial_audit.json`, and `manifest.json`. The
+launcher defaults to `--skip-existing`, so completed dataset directories are not
+rerun unless `--no-skip-existing` is passed.
+
 The script writes model predictions, public-memory artifacts, cloud-safe
 benchmarks, state directories, and adversarial audit reports under
 `evaluation/results/memprivacy4b_*`. The tracked repo remains code/config only;
