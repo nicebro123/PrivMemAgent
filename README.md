@@ -470,6 +470,58 @@ and memory-system result JSON files under the selected `output_path`. Treat
 before sending artifacts to a cloud memory backend.
 
 
+
+### 6) Default MemPrivacy-4B-RL Memory Workflow
+
+The default research workflow now uses the released **MemPrivacy-4B-RL** model
+as the privacy extractor. Oracle annotations remain useful for upper-bound
+analysis, but new experiments should use model annotations unless a paper table
+explicitly says otherwise.
+
+Expected local assets on the H20 server:
+
+```text
+/mnt/infini-data/test/quan_space/codespace/memprivate/models/
+├── MemPrivacy-4B-RL-hf/   # downloaded from Hugging Face via HF mirror
+└── bge-m3/                # local embedding model
+```
+
+Run a tiny end-to-end smoke on GPU 0:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python -m tools.run_memprivacy4b_memory_workflow   --mode smoke
+```
+
+Run the 5-user PersonaMem-v2 pilot and include Mem0/LangMem baselines:
+
+```bash
+source ~/.config/memprivate/deepseek.env
+CUDA_VISIBLE_DEVICES=0 python -m tools.run_memprivacy4b_memory_workflow   --mode persona5   --run-memory-systems   --memory-system mem0   --memory-system langmem
+```
+
+Run the full released PersonaMem-v2 model-annotation workflow:
+
+```bash
+source ~/.config/memprivate/deepseek.env
+CUDA_VISIBLE_DEVICES=0 python -m tools.run_memprivacy4b_memory_workflow   --mode full
+```
+
+Each mode performs:
+
+```text
+MemPrivacy-4B-RL privacy extraction
+  -> writes privacy_info_llm
+  -> compiles model-annotated public memory with --annotation-source model
+  -> writes a cloud-safe benchmark JSONL
+  -> runs adversarial leakage audit
+  -> optionally runs Mem0/LangMem/Memobase on the cloud-safe benchmark
+```
+
+Use `--dry-run` to print the exact commands before launching a long experiment.
+All generated runtime configs, model predictions, public-memory artifacts,
+states, audits, and baseline result files stay under ignored runtime/results
+paths and are not committed to git.
+
 ## Evaluate The Privacy Extractor
 
 ```bash

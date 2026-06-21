@@ -97,6 +97,39 @@ profile therefore uses a local BGE-M3 embedding checkpoint at
 dimensions. Set `embedding_model.device` to `cuda:0` if you want faster local
 embedding; CPU is the default to avoid occupying GPUs during API-bound runs.
 
+
+## Default 4B Model-Annotated Memory Workflow
+
+Use `tools.run_memprivacy4b_memory_workflow` for new experiments. It standardizes
+on MemPrivacy-4B-RL as the privacy extractor, local BGE-M3 embeddings, GPU 0,
+and `--annotation-source model` for public-memory construction.
+
+Check commands without launching work:
+
+```bash
+python -m tools.run_memprivacy4b_memory_workflow --mode persona5 --dry-run
+python -m tools.run_memprivacy4b_memory_workflow --mode full --dry-run
+```
+
+Run the 5-user pilot with memory-system baselines:
+
+```bash
+source ~/.config/memprivate/deepseek.env
+CUDA_VISIBLE_DEVICES=0 python -m tools.run_memprivacy4b_memory_workflow   --mode persona5   --run-memory-systems   --memory-system mem0   --memory-system langmem
+```
+
+Run the full released PersonaMem-v2 flow:
+
+```bash
+source ~/.config/memprivate/deepseek.env
+CUDA_VISIBLE_DEVICES=0 python -m tools.run_memprivacy4b_memory_workflow --mode full
+```
+
+The script writes model predictions, public-memory artifacts, cloud-safe
+benchmarks, state directories, and adversarial audit reports under
+`evaluation/results/memprivacy4b_*`. The tracked repo remains code/config only;
+model weights stay under the external model asset root.
+
 ## Infrastructure Smoke
 
 Compile the synthetic smoke dataset:
