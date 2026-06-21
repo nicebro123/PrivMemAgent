@@ -66,6 +66,42 @@ def test_learned_selector_fails_closed_on_exact_leak():
     assert "exact leak" in result.reason
 
 
+def test_learned_selector_fails_closed_on_private_fragment_leak():
+    selector = LearnedUtilityLeakageSelector(
+        config=SelectorConfig(utility_floor=0.1, max_leakage=1.0, max_public_tokens=20)
+    )
+
+    result = selector.select(
+        [candidate("contact domain example.com", 1, 1.0, 0.1, 3)],
+        privacy_item={
+            "original_text": "alice@example.com",
+            "privacy_type": "Email",
+            "privacy_level": "PL2",
+        },
+    )
+
+    assert result.selected is None
+    assert "exact leak" in result.reason
+
+
+def test_learned_selector_fails_closed_on_numeric_suffix_leak():
+    selector = LearnedUtilityLeakageSelector(
+        config=SelectorConfig(utility_floor=0.1, max_leakage=1.0, max_public_tokens=20)
+    )
+
+    result = selector.select(
+        [candidate("phone ending 7843", 1, 1.0, 0.1, 3)],
+        privacy_item={
+            "original_text": "+1-617-492-7843",
+            "privacy_type": "Phone Number",
+            "privacy_level": "PL2",
+        },
+    )
+
+    assert result.selected is None
+    assert "exact leak" in result.reason
+
+
 def test_linear_ranker_loads_weights_from_artifact(tmp_path):
     artifact = tmp_path / "selector.json"
     artifact.write_text(

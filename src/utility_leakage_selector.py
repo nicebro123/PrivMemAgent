@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Protocol
 
+from src.abstraction_generator import private_fragments
 from src.sufficiency_selector import (
     RepresentationCandidate,
     SelectionResult,
@@ -174,7 +175,13 @@ class LearnedUtilityLeakageSelector:
         exact_leak = False
         if privacy_item:
             original = str(privacy_item.get("original_text", "")).strip()
-            exact_leak = bool(original and original.casefold() in candidate.text.casefold())
+            exact_leak = bool(
+                original
+                and any(
+                    fragment.casefold() in candidate.text.casefold()
+                    for fragment in private_fragments(original)
+                )
+            )
         return SelectorFeatures.from_candidate(
             candidate,
             privacy_item=privacy_item,

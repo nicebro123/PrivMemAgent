@@ -6,6 +6,7 @@ from src.abstraction_generator import (
     AbstractionInput,
     ArtifactBackedAbstractionGenerator,
     RuleBasedAbstractionGenerator,
+    private_fragments,
 )
 
 
@@ -67,3 +68,48 @@ def test_artifact_generator_filters_exact_private_leaks(tmp_path):
     texts = [candidate.text for candidate in candidates]
     assert "alice@example.com" not in texts
     assert "reachable through private contact information" in texts
+
+
+def test_artifact_generator_filters_private_fragments(tmp_path):
+    artifact = tmp_path / "abstractions.json"
+    artifact.write_text(
+        json.dumps(
+            {
+                "templates": [
+                    {
+                        "privacy_type": "Email",
+                        "privacy_level": "PL2",
+                        "text": "contact domain example.com",
+                        "abstraction_level": 2,
+                        "utility_score": 0.9,
+                        "leakage_score": 0.2,
+                        "representation_type": "unsafe_domain",
+                    },
+                    {
+                        "privacy_type": "Email",
+                        "privacy_level": "PL2",
+                        "text": "contact information",
+                        "abstraction_level": 2,
+                        "utility_score": 0.8,
+                        "leakage_score": 0.2,
+                        "representation_type": "safe_contact",
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    candidates = ArtifactBackedAbstractionGenerator(artifact).generate(abstraction_input())
+
+    texts = [candidate.text for candidate in candidates]
+    assert "contact domain example.com" not in texts
+    assert "contact information" in texts
+
+
+def test_private_fragments_include_high_signal_substrings():
+    fragments = private_fragments("alice@example.com")
+
+    assert "alice@example.com" in fragments
+    assert "example.com" in fragments
+    assert "alice" in fragments

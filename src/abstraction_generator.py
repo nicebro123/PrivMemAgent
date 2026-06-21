@@ -22,7 +22,38 @@ def _contains_exact_private_text(candidate: str, privacy_item: Mapping[str, str]
     original = str(privacy_item.get("original_text", "")).strip()
     if not original:
         return False
-    return original.casefold() in candidate.casefold()
+    return any(fragment.casefold() in candidate.casefold() for fragment in private_fragments(original))
+
+
+def private_fragments(original: str) -> set[str]:
+    """Return high-signal private fragments that must not appear in public text.
+
+    Learned generators can accidentally leak a substring instead of the complete
+    value, for example an email domain, a phone suffix, a zip code, or a token
+    fragment. We keep the filter conservative and require moderately long
+    fragments to reduce false positives on ordinary words.
+    """
+
+    value = original.strip()
+    fragments = {value} if value else set()
+    for token in re.findall(r"[A-Za-z0-9][A-Za-z0-9_@.+-]{2,}", value):
+        cleaned = token.strip(".,;:!?()[]{}<>，。；：！？（）【】")
+        if len(cleaned) >= 4:
+            fragments.add(cleaned)
+        if "@" in cleaned:
+            local, _, domain = cleaned.partition("@")
+            if len(local) >= 4:
+                fragments.add(local)
+            if len(domain) >= 4:
+                fragments.add(domain)
+            for part in domain.split("."):
+                if len(part) >= 4:
+                    fragments.add(part)
+    digits = re.sub(r"\D+", "", value)
+    if len(digits) >= 4:
+        fragments.add(digits)
+        fragments.add(digits[-4:])
+    return {fragment for fragment in fragments if len(fragment) >= 4}
 
 
 @dataclass(frozen=True)
