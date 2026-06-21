@@ -35,7 +35,11 @@ PRIVACY_SCHEMA = {
 def build_vllm_writer(model_path: str, revision: Optional[str] = None) -> Callable[[str, str], str]:
     from transformers import AutoTokenizer
     from vllm import LLM, SamplingParams
-    from vllm.sampling_params import StructuredOutputsParams
+
+    try:
+        from vllm.sampling_params import StructuredOutputsParams
+    except ImportError:  # vLLM >= 0.10 uses guided decoding APIs instead.
+        StructuredOutputsParams = None
 
     is_local_model = Path(model_path).expanduser().exists()
     if not is_local_model and not re.fullmatch(r"[0-9a-fA-F]{40}", revision or ""):
@@ -49,13 +53,15 @@ def build_vllm_writer(model_path: str, revision: Optional[str] = None) -> Callab
         revision=revision,
         local_files_only=is_local_model,
     )
-    sampling_params = SamplingParams(
-        temperature=0.1,
-        top_p=0.1,
-        repetition_penalty=1.05,
-        max_tokens=6144,
-        structured_outputs=StructuredOutputsParams(json=PRIVACY_SCHEMA),
-    )
+    sampling_kwargs = {
+        "temperature": 0.1,
+        "top_p": 0.1,
+        "repetition_penalty": 1.05,
+        "max_tokens": 6144,
+    }
+    if StructuredOutputsParams is not None:
+        sampling_kwargs["structured_outputs"] = StructuredOutputsParams(json=PRIVACY_SCHEMA)
+    sampling_params = SamplingParams(**sampling_kwargs)
     model = LLM(
         model=model_path,
         revision=revision,
