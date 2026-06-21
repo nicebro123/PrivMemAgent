@@ -26,6 +26,26 @@ python -m tools.preflight_memory_eval --system mem0 --system langmem
 Memobase additionally requires a reachable server and runtime-only
 `MEMOBASE_PROJECT_URL` and `MEMOBASE_API_KEY`.
 
+
+## DeepSeek API profile
+
+DeepSeek can be used for OpenAI-compatible chat/reasoning calls by loading a
+runtime-only environment file and selecting the DeepSeek config profile:
+
+```bash
+source ~/.config/memprivate/deepseek.env
+export MEMPRIVACY_EVAL_CONFIG=evaluation/eval_config.deepseek.yaml
+python -m tools.preflight_memory_eval --system langmem --probe-openai
+```
+
+The key file must stay outside git and mode `0600`. DeepSeek official chat
+models work for `memory_llm`, `answer_llm`, and `judgment_llm`, but the official
+API does not provide an OpenAI-compatible embeddings endpoint for
+`text-embedding-3-small`. Mem0 and LangMem therefore still need a separate
+embedding provider before full memory-system runs; public-memory compilation,
+budget sweeps, adversarial audits, and direct chat/judge calls do not need local
+GPUs.
+
 ## Infrastructure Smoke
 
 Compile the synthetic smoke dataset:

@@ -57,6 +57,8 @@ def file_sha256(path: str) -> str:
 
 
 def _load_config(config_path: str = "eval_config.yaml") -> Dict[str, Any]:
+    if config_path == "eval_config.yaml":
+        config_path = os.getenv("MEMPRIVACY_EVAL_CONFIG", config_path)
     resolved = _resolve_evaluation_path(config_path)
     with resolved.open("r", encoding="utf-8") as f:
         config = yaml.safe_load(f) or {}
