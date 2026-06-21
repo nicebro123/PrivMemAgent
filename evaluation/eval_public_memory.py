@@ -12,6 +12,7 @@ from typing import Dict, Iterable, List, Mapping, Optional
 import yaml
 from tqdm import tqdm
 
+from src.abstraction_generator import AbstractorAdapter, load_abstraction_generator
 from src.alias_router import ScopedAliasRouter
 from src.context_minimizer import ContextMinimizer, ContextMinimizerConfig
 from src.leakage_auditor import AuditThresholds, LeakageAuditor
@@ -21,6 +22,7 @@ from src.provenance import ProvenanceStore
 from src.public_memory_compiler import CompiledMemory, PublicMemoryCompiler
 from src.sufficiency_selector import SelectorConfig, SufficiencySelector
 from src.utility_auditor import UtilityProxyAuditor
+from src.utility_leakage_selector import load_utility_leakage_selector
 
 
 def _annotation_items(message: Mapping, source: str) -> List[dict]:
@@ -42,6 +44,16 @@ def _build_compiler(config: dict, state_dir: Path) -> PublicMemoryCompiler:
     public_config = config["public_memory"]
     selector_config = public_config.get("selector", {})
     minimizer_config = public_config.get("context_minimizer", {})
+    selector = SelectorConfig(
+        utility_floor=float(selector_config.get("utility_floor", 0.75)),
+        max_leakage=float(selector_config.get("max_leakage", 0.35)),
+        max_public_tokens=int(selector_config.get("max_public_tokens", 128)),
+    )
+    abstraction_config = public_config.get("abstraction_generator", {"mode": "rule"})
+    learned_selector = load_utility_leakage_selector(
+        public_config.get("utility_leakage_selector", {}),
+        selector_config=selector,
+    )
     return PublicMemoryCompiler(
         policy=PrivacyPolicy.from_dict(config),
         alias_router=ScopedAliasRouter(
@@ -50,12 +62,10 @@ def _build_compiler(config: dict, state_dir: Path) -> PublicMemoryCompiler:
         ),
         provenance_store=ProvenanceStore(str(state_dir / "provenance.db")),
         selector=SufficiencySelector(
-            SelectorConfig(
-                utility_floor=float(selector_config.get("utility_floor", 0.75)),
-                max_leakage=float(selector_config.get("max_leakage", 0.35)),
-                max_public_tokens=int(selector_config.get("max_public_tokens", 128)),
-            )
+            selector
         ),
+        abstractor=AbstractorAdapter(load_abstraction_generator(abstraction_config)),
+        learned_selector=learned_selector,
         context_minimizer=ContextMinimizer(
             ContextMinimizerConfig(
                 enabled=bool(minimizer_config.get("enabled", True)),

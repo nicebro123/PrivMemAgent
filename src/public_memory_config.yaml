@@ -14,6 +14,17 @@ public_memory:
     utility_floor: 0.75
     max_leakage: 0.35
     max_public_tokens: 128
+  abstraction_generator:
+    mode: rule
+    # mode: learned
+    # artifact_path: artifacts/abstraction_generators/generator_v1/templates.json
+  utility_leakage_selector:
+    mode: disabled
+    # mode: linear
+    # artifact_path: artifacts/selectors/utility_leakage_selector_v1/weights.json
+    # score_threshold: -inf
+    fail_closed_on_exact_leak: true
+    fail_closed_on_pl4: true
   context_minimizer:
     enabled: true
     target_public_ratio: 0.65

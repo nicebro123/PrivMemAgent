@@ -506,6 +506,21 @@ Exit criteria:
 5. Can a compact local generator match DeepSeek-generated abstraction quality
    after distillation?
 
+## Implemented Code Entry Points
+
+The first implementation pass adds the following concrete interfaces:
+
+- `src/abstraction_generator.py`: deterministic fallback generator, JSON-artifact-backed learned generator, safe candidate filtering, and an adapter for the existing compiler.
+- `src/utility_leakage_selector.py`: learned-selector feature schema, linear utility-leakage ranker, JSON weight loading, and fail-closed exact/PL4 guards.
+- `training/build_abstraction_data.py`: builds abstraction-generator training examples from oracle or model annotations.
+- `training/build_selector_data.py`: converts abstraction examples into candidate-level selector examples with initial utility/leakage labels.
+- `src/public_memory_config.yaml`: optional `abstraction_generator` and `utility_leakage_selector` configuration blocks.
+
+The default configuration remains conservative: rule-based abstraction is enabled
+and the learned selector is disabled. Learned artifacts can be activated by
+setting `public_memory.abstraction_generator.mode` to `learned` or
+`public_memory.utility_leakage_selector.mode` to `linear`.
+
 ## Immediate Next Step
 
 After the current full 4B extraction/public-memory run completes, build the

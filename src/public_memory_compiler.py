@@ -22,6 +22,7 @@ from src.sufficiency_selector import (
     SelectorConfig,
     SufficiencySelector,
 )
+from src.utility_leakage_selector import LearnedUtilityLeakageSelector
 
 
 def _estimate_tokens(text: str) -> int:
@@ -174,6 +175,7 @@ class PublicMemoryCompiler:
         provenance_store: ProvenanceStore,
         selector: Optional[SufficiencySelector] = None,
         abstractor: Optional[RuleBasedAbstractor] = None,
+        learned_selector: Optional[LearnedUtilityLeakageSelector] = None,
         context_minimizer: Optional[ContextMinimizer] = None,
     ):
         self.policy = policy
@@ -181,6 +183,7 @@ class PublicMemoryCompiler:
         self.provenance_store = provenance_store
         self.selector = selector or SufficiencySelector()
         self.abstractor = abstractor or RuleBasedAbstractor()
+        self.learned_selector = learned_selector
         self.context_minimizer = context_minimizer or ContextMinimizer()
 
     @classmethod
@@ -203,6 +206,36 @@ class PublicMemoryCompiler:
             selector=SufficiencySelector(selector_config),
         )
 
+    def _abstraction_candidates(
+        self,
+        privacy_item: Mapping[str, str],
+        context: RoutingContext,
+        message_text: str,
+    ) -> list[RepresentationCandidate]:
+        try:
+            return self.abstractor.candidates(
+                privacy_item,
+                required_types=context.exact_required_types,
+                user_id=context.user_id,
+                message_id=context.message_id,
+                role=context.message_role,
+                message_text=message_text,
+            )
+        except TypeError:
+            return self.abstractor.candidates(
+                privacy_item,
+                required_types=context.exact_required_types,
+            )
+
+    def _select_abstraction(
+        self,
+        candidates: list[RepresentationCandidate],
+        privacy_item: Mapping[str, str],
+    ) -> SelectionResult:
+        if self.learned_selector is not None:
+            return self.learned_selector.select(candidates, privacy_item=privacy_item)
+        return self.selector.select(candidates)
+
     @staticmethod
     def _selected_items(items: Iterable[Mapping[str, str]]) -> List[Tuple[int, Mapping[str, str]]]:
         selected: Dict[str, Tuple[int, Mapping[str, str]]] = {}
@@ -223,6 +256,7 @@ class PublicMemoryCompiler:
         item_index: int,
         privacy_item: Mapping[str, str],
         context: RoutingContext,
+        message_text: str,
     ) -> Tuple[CompiledItem, str]:
         decision = self.policy.route(privacy_item, context)
         public_value: Optional[str] = None
@@ -238,11 +272,9 @@ class PublicMemoryCompiler:
                 privacy_item["privacy_level"],
                 context,
             )
-            selection: SelectionResult = self.selector.select(
-                self.abstractor.candidates(
-                    privacy_item,
-                    required_types=context.exact_required_types,
-                )
+            selection = self._select_abstraction(
+                self._abstraction_candidates(privacy_item, context, message_text),
+                privacy_item,
             )
             if selection.selected:
                 public_value = selection.selected.text
@@ -327,6 +359,7 @@ class PublicMemoryCompiler:
                 item_index,
                 privacy_item,
                 context,
+                message_text,
             )
             compiled_items.append(compiled)
             original = privacy_item["original_text"]
