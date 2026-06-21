@@ -811,7 +811,9 @@ ruff check src evaluation tests tools
 Development notes:
 
 - [Correctness and reproducibility](docs/CORRECTNESS_NOTES.md)
+- [Baseline comparison and innovation positioning](docs/BASELINE_COMPARISON_AND_INNOVATION.md)
 - [Minimal sufficient public memory roadmap](docs/INNOVATION_ROADMAP.md)
+- [Learned module development plan](docs/LEARNED_MODULE_DEVELOPMENT_PLAN.md)
 - [Minimal public memory preliminary results](docs/PRELIMINARY_RESULTS.md)
 - [Memory evaluation runbook](docs/MEMORY_EVAL_RUNBOOK.md)
 

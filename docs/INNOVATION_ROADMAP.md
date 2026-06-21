@@ -1,5 +1,10 @@
 # Minimal Sufficient Public Memory Roadmap
 
+Companion planning documents:
+
+- [Baseline comparison and innovation positioning](BASELINE_COMPARISON_AND_INNOVATION.md)
+- [Learned module development plan](LEARNED_MODULE_DEVELOPMENT_PLAN.md)
+
 ## Status
 
 The deterministic research baseline is now implemented:
