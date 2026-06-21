@@ -428,6 +428,24 @@ Each budget run writes public memory, optional cloud-safe benchmark data,
 reduction, utility proxy recall, exact/PL4 leakage, adversarial failures, and
 warning counts for plotting the utility/privacy/minimality trade-off.
 
+For a lightweight held-out learned attacker baseline, train a bag-of-words
+Naive Bayes attribute attacker on source-user labels and public artifacts:
+
+```bash
+python -m tools.learned_attribute_attack \
+  --source data/personamem_v2_testset.jsonl \
+  --artifact evaluation/results/persona_public.jsonl \
+  --target medical \
+  --target-term medical \
+  --target-term health \
+  --source-user-limit 20 \
+  --report evaluation/results/persona_medical_attack.json
+```
+
+The report includes held-out accuracy, ROC AUC, majority baseline accuracy, and
+top positive tokens. Treat it as a cheap attacker sanity check before training
+stronger neural or LLM-based attackers.
+
 Evaluation logic:
 1. feed dialogues turn-by-turn into the memory system (optionally with MemPrivacy masking)
 2. protect known sensitive values in questions and options before cloud retrieval

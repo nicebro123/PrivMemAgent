@@ -16,11 +16,13 @@ The deterministic research baseline is now implemented:
 This is not yet the final learned method. The deterministic audit now covers
 exact recovery, source identifiers, sensitive metadata, linkability markers,
 membership markers, canary exposure, and prompt-injection strings, with per-user
-scoping for partial artifacts. The compiler also has a conservative residual
-scrubber for known same-user sensitive tokens. Downstream memory QA, utility
-recovery after conservative scrubbing, held-out learned attackers, and learned
-selector training remain required before making the full paper claim described
-below.
+scoping for partial artifacts. A lightweight held-out bag-of-words attribute
+attacker is available as a cheap learned-attack baseline, but stronger neural or
+LLM-based attackers are still required. The compiler also has a conservative
+residual scrubber for known same-user sensitive tokens. Downstream memory QA,
+utility recovery after conservative scrubbing, stronger held-out learned
+attackers, and learned selector training remain required before making the full
+paper claim described below.
 
 ## Problem Statement
 
@@ -237,7 +239,9 @@ upper bound rather than as an end-to-end system result.
 Steps 1-4 are implemented, and the deterministic adversarial audit now covers
 most roadmap attack surfaces as rule-based checks. A budget-sweep tool now
 produces utility/leakage/minimality summaries across `max_public_tokens` values
-for Pareto-frontier analysis. The current safety-first residual scrubber can
-reduce utility on some partial PersonaMem-v2 runs, so Step 5, learned held-out
-attackers, learned utility-aware selection, and end-to-end memory-system utility
-experiments are pending. See [Preliminary results](PRELIMINARY_RESULTS.md).
+for Pareto-frontier analysis. A lightweight held-out Naive Bayes attribute
+attacker is implemented as an initial learned-attack baseline. The current
+safety-first residual scrubber can reduce utility on some partial PersonaMem-v2
+runs, so stronger held-out attackers, learned utility-aware selection, and
+end-to-end memory-system utility experiments are pending. See [Preliminary
+results](PRELIMINARY_RESULTS.md).
