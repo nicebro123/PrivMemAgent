@@ -94,6 +94,8 @@ _CLIENTS: Dict[Tuple[str, str], OpenAI] = {}
 
 
 def _get_config(config_path: str = "eval_config.yaml") -> Dict[str, Any]:
+    if config_path == "eval_config.yaml":
+        config_path = os.getenv("MEMPRIVACY_EVAL_CONFIG", config_path)
     resolved = str(_resolve_evaluation_path(config_path))
     if resolved not in _CONFIGS:
         _CONFIGS[resolved] = _load_config(resolved)
@@ -158,7 +160,7 @@ def _resolve_llm_params(
 def call_llm(
     query: str,
     llm_type: str = "answer_llm",
-    config_path: str = "eval_config.yaml",
+    config_path: str | None = None,
     return_parsed_json: bool = False,
     extract_json: bool = False,
 ) -> str:
@@ -187,7 +189,7 @@ def call_llm(
         The LLM response content. The exact type depends on extract_json
         and return_parsed_json parameters.
     """
-    config = _get_config(config_path)
+    config = _get_config(config_path or "eval_config.yaml")
     params = _resolve_llm_params(llm_type, config)
 
     # Build a retry-wrapped inner request function using per-llm retry params

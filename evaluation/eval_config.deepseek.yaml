@@ -8,7 +8,7 @@ embedding_model:
   device: "cpu"
 
 memory_llm:
-  model: "deepseek-chat"
+  model: "deepseek-v4-flash"
   input_max_tokens: 128000
   max_tokens: 32768
   temperature: 0
@@ -18,7 +18,7 @@ memory_llm:
   wait_time_upper: 30
 
 answer_llm:
-  model: "deepseek-chat"
+  model: "deepseek-v4-flash"
   max_tokens: 32768
   temperature: 0
   timeout: 300
@@ -27,7 +27,7 @@ answer_llm:
   wait_time_upper: 60
 
 judgment_llm:
-  model: "deepseek-reasoner"
+  model: "deepseek-v4-pro"
   max_tokens: 32768
   temperature: 0.0
   timeout: 800
@@ -47,7 +47,7 @@ privacy_llm:
   wait_time_upper: 30
 
 GPT_5.2:
-  model: "deepseek-reasoner"
+  model: "deepseek-v4-pro"
   max_tokens: 32768
   temperature: 0.0
   timeout: 300
