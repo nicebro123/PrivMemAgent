@@ -110,4 +110,14 @@ python -m tools.public_memory_budget_sweep \
   --user-limit 5 \
   --minimum-token-reduction -1.0 \
   --budget 16 --budget 64 --budget 128
+
+python -m tools.public_memory_budget_selector \
+  --summary evaluation/results/persona_budget_sweep_summary.json \
+  --output evaluation/results/persona_budget_sweep_recommendation.json \
+  --min-utility 0.75 \
+  --min-local-recoverability 0.95
 ```
+
+Use the recommendation JSON as the deployable selector-calibration record: it
+keeps rejected budgets with failure reasons, the smallest safe budget, the
+highest-utility safe budget, and the safe Pareto frontier.

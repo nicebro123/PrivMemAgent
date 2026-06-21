@@ -428,6 +428,20 @@ Each budget run writes public memory, optional cloud-safe benchmark data,
 reduction, utility proxy recall, exact/PL4 leakage, adversarial failures, and
 warning counts for plotting the utility/privacy/minimality trade-off.
 
+After a sweep, choose a deployable budget with policy gates:
+
+```bash
+python -m tools.public_memory_budget_selector \
+  --summary evaluation/results/budget_sweep_smoke_summary.json \
+  --output evaluation/results/budget_sweep_smoke_recommendation.json \
+  --min-utility 0.75 \
+  --min-local-recoverability 0.95
+```
+
+The selector reports the smallest safe budget, the highest-utility safe budget,
+and the Pareto frontier after builtin, cloud-safe, adversarial, exact-recovery,
+PL4-retention, utility, and local-recoverability gates.
+
 For a lightweight held-out learned attacker baseline, train a bag-of-words
 Naive Bayes attribute attacker on source-user labels and public artifacts:
 

@@ -239,9 +239,11 @@ upper bound rather than as an end-to-end system result.
 Steps 1-4 are implemented, and the deterministic adversarial audit now covers
 most roadmap attack surfaces as rule-based checks. A budget-sweep tool now
 produces utility/leakage/minimality summaries across `max_public_tokens` values
-for Pareto-frontier analysis. A lightweight held-out Naive Bayes attribute
-attacker is implemented as an initial learned-attack baseline. The current
-safety-first residual scrubber can reduce utility on some partial PersonaMem-v2
-runs, so stronger held-out attackers, learned utility-aware selection, and
-end-to-end memory-system utility experiments are pending. See [Preliminary
-results](PRELIMINARY_RESULTS.md).
+for Pareto-frontier analysis. A follow-up selector turns those summaries into a
+deployable budget recommendation by applying privacy, cloud-safety,
+adversarial, utility, and local-recoverability gates. A lightweight held-out
+Naive Bayes attribute attacker is implemented as an initial learned-attack
+baseline. The current safety-first residual scrubber can reduce utility on some
+partial PersonaMem-v2 runs, so stronger held-out attackers, learned
+utility-aware selection, and end-to-end memory-system utility experiments are
+pending. See [Preliminary results](PRELIMINARY_RESULTS.md).
