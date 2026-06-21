@@ -258,3 +258,193 @@ def test_edge_query_broker_rejects_unauthorized_private_hydration(tmp_path):
     else:
         raise AssertionError("unauthorized private hydration must fail closed")
     compiler.close()
+
+
+def test_public_memory_compiler_drops_entire_secret_sentence_for_pl4(tmp_path):
+    from src.alias_router import ScopedAliasRouter
+    from src.policy import PrivacyPolicy, RoutingContext
+    from src.provenance import ProvenanceStore
+    from src.public_memory_compiler import PublicMemoryCompiler
+
+    compiler = PublicMemoryCompiler(
+        policy=PrivacyPolicy.default(),
+        alias_router=ScopedAliasRouter(
+            str(tmp_path / "aliases.db"),
+            key_path=str(tmp_path / "aliases.key"),
+        ),
+        provenance_store=ProvenanceStore(str(tmp_path / "provenance.db")),
+    )
+
+    compiled = compiler.compile(
+        message_text=(
+            "My favorite weekend activity is birdwatching. "
+            "The temporary verification code is 829417. "
+            "Please remember the hobby."
+        ),
+        privacy_items=[
+            {
+                "original_text": "829417",
+                "privacy_type": "Verification Code",
+                "privacy_level": "PL4",
+            }
+        ],
+        context=RoutingContext(user_id="u1", message_id="m1"),
+    )
+
+    assert "829417" not in compiled.public_text
+    assert "verification code" not in compiled.public_text.lower()
+    assert "birdwatching" in compiled.public_text
+
+
+def test_public_memory_compiler_drops_assistant_privacy_boilerplate(tmp_path):
+    from src.alias_router import ScopedAliasRouter
+    from src.policy import PrivacyPolicy, RoutingContext
+    from src.provenance import ProvenanceStore
+    from src.public_memory_compiler import PublicMemoryCompiler
+
+    compiler = PublicMemoryCompiler(
+        policy=PrivacyPolicy.default(),
+        alias_router=ScopedAliasRouter(
+            str(tmp_path / "aliases.db"),
+            key_path=str(tmp_path / "aliases.key"),
+        ),
+        provenance_store=ProvenanceStore(str(tmp_path / "provenance.db")),
+    )
+
+    compiled = compiler.compile(
+        message_text="I will not retain the verification code.",
+        privacy_items=[],
+        context=RoutingContext(
+            user_id="u1",
+            message_id="m1",
+            message_role="assistant",
+        ),
+    )
+
+    assert compiled.public_text == ""
+
+
+def test_public_memory_compiler_merges_overlapping_local_and_drop_ranges(tmp_path):
+    from src.alias_router import ScopedAliasRouter
+    from src.policy import PrivacyPolicy, RoutingContext
+    from src.provenance import ProvenanceStore
+    from src.public_memory_compiler import PublicMemoryCompiler
+
+    compiler = PublicMemoryCompiler(
+        policy=PrivacyPolicy.default(),
+        alias_router=ScopedAliasRouter(
+            str(tmp_path / "aliases.db"),
+            key_path=str(tmp_path / "aliases.key"),
+        ),
+        provenance_store=ProvenanceStore(str(tmp_path / "provenance.db")),
+    )
+
+    compiled = compiler.compile(
+        message_text=(
+            "I purchased a report for $150.00 for it, and the transaction ID "
+            "is TXN-88492-TAS. I need to check the land."
+        ),
+        privacy_items=[
+            {
+                "original_text": "report for $150.00 for it",
+                "privacy_type": "Transaction Record",
+                "privacy_level": "PL3",
+            },
+            {
+                "original_text": "TXN-88492-TAS",
+                "privacy_type": "Project/Task ID",
+                "privacy_level": "PL4",
+            },
+        ],
+        context=RoutingContext(user_id="u1", message_id="m1"),
+    )
+
+    assert "TXN-88492-TAS" not in compiled.public_text
+    assert "transaction ID" not in compiled.public_text
+    assert "check the land" in compiled.public_text
+
+
+def test_public_memory_compiler_drops_entire_local_only_sentence_for_pl3(tmp_path):
+    from src.alias_router import ScopedAliasRouter
+    from src.policy import PrivacyPolicy, RoutingContext
+    from src.provenance import ProvenanceStore
+    from src.public_memory_compiler import PublicMemoryCompiler
+
+    compiler = PublicMemoryCompiler(
+        policy=PrivacyPolicy.default(),
+        alias_router=ScopedAliasRouter(
+            str(tmp_path / "aliases.db"),
+            key_path=str(tmp_path / "aliases.key"),
+        ),
+        provenance_store=ProvenanceStore(str(tmp_path / "provenance.db")),
+    )
+
+    compiled = compiler.compile(
+        message_text=(
+            "The restaurant should be quiet. "
+            "My Amex card ending in 8865 paid for the trip. "
+            "I prefer window seats."
+        ),
+        privacy_items=[
+            {
+                "original_text": "card ending in 8865",
+                "privacy_type": "Financial Account",
+                "privacy_level": "PL3",
+            }
+        ],
+        context=RoutingContext(user_id="u1", message_id="m1"),
+    )
+
+    assert "Amex" not in compiled.public_text
+    assert "8865" not in compiled.public_text
+    assert "window seats" in compiled.public_text
+
+
+def test_public_memory_compiler_drops_user_forget_control_messages(tmp_path):
+    from src.alias_router import ScopedAliasRouter
+    from src.policy import PrivacyPolicy, RoutingContext
+    from src.provenance import ProvenanceStore
+    from src.public_memory_compiler import PublicMemoryCompiler
+
+    compiler = PublicMemoryCompiler(
+        policy=PrivacyPolicy.default(),
+        alias_router=ScopedAliasRouter(
+            str(tmp_path / "aliases.db"),
+            key_path=str(tmp_path / "aliases.key"),
+        ),
+        provenance_store=ProvenanceStore(str(tmp_path / "provenance.db")),
+    )
+
+    compiled = compiler.compile(
+        message_text="Please forget that I enjoy casual cycling around the neighborhood.",
+        privacy_items=[],
+        context=RoutingContext(user_id="u1", message_id="m1"),
+    )
+
+    assert compiled.public_text == ""
+    compiler.close()
+
+
+def test_public_memory_compiler_drops_ephemeral_task_requests(tmp_path):
+    from src.alias_router import ScopedAliasRouter
+    from src.policy import PrivacyPolicy, RoutingContext
+    from src.provenance import ProvenanceStore
+    from src.public_memory_compiler import PublicMemoryCompiler
+
+    compiler = PublicMemoryCompiler(
+        policy=PrivacyPolicy.default(),
+        alias_router=ScopedAliasRouter(
+            str(tmp_path / "aliases.db"),
+            key_path=str(tmp_path / "aliases.key"),
+        ),
+        provenance_store=ProvenanceStore(str(tmp_path / "provenance.db")),
+    )
+
+    compiled = compiler.compile(
+        message_text="Could you also suggest a few alternative metaphors for this paragraph?",
+        privacy_items=[],
+        context=RoutingContext(user_id="u1", message_id="m1"),
+    )
+
+    assert compiled.public_text == ""
+    compiler.close()

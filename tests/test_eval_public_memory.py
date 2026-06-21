@@ -85,9 +85,15 @@ def test_public_memory_runner_never_serializes_raw_secret(tmp_path):
 
     serialized = output_path.read_text(encoding="utf-8")
     cloud_serialized = cloud_safe_path.read_text(encoding="utf-8")
+    assert "u1" not in serialized
+    assert "u1:message" not in serialized
     assert "alice@example.com" not in serialized
     assert "829417" not in serialized
     assert "original_text" not in serialized
+    assert "source_fingerprint" not in serialized
+    assert "privacy_type" not in serialized
+    assert "privacy_level" not in serialized
+    assert "provenance_id" not in serialized
     assert "alice@example.com" not in cloud_serialized
     assert "829417" not in cloud_serialized
     assert json.loads(cloud_serialized)["uuid"].startswith("User-")
@@ -145,3 +151,133 @@ def test_public_memory_runner_excludes_invalid_annotations_from_audit(tmp_path):
     assert result["invalid_annotation_count"] == 1
     assert result["audit"]["total_sensitive_items"] == 0
     assert result["audit"]["total_pl4_items"] == 0
+
+
+def test_public_memory_runner_scrubs_residual_user_level_sensitive_terms(tmp_path):
+    input_path = tmp_path / "input.jsonl"
+    output_path = tmp_path / "public.jsonl"
+    metrics_path = tmp_path / "metrics.json"
+    cloud_safe_path = tmp_path / "cloud-safe.jsonl"
+    input_path.write_text(
+        json.dumps(
+            {
+                "uuid": "u1",
+                "metadata": {"user_name": "David"},
+                "dialogues": [
+                    {
+                        "role": "user",
+                        "content": "My Amex card ending in 8865 is private.",
+                        "privacy_info": [
+                            {
+                                "original_text": "Amex card ending in 8865",
+                                "privacy_type": "Financial Account",
+                                "privacy_level": "PL3",
+                            }
+                        ],
+                    },
+                    {
+                        "role": "assistant",
+                        "content": "David should never expose Amex in cloud memory.",
+                        "privacy_info": [],
+                    },
+                ],
+                "questions": [
+                    {
+                        "question": "What did David ask about Amex?",
+                        "answer": "David asked about Amex.",
+                        "evidence": "David mentioned Amex.",
+                        "all_options": ["David", "Amex", "public option"],
+                    }
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config = {
+        "public_memory": {
+            "policy": {"pl2": "public_abstract", "pl3": "local_only", "pl4": "drop"},
+            "selector": {},
+            "leakage_budget": {"minimum_token_reduction": -1.0},
+        }
+    }
+
+    compile_dataset(
+        input_path=input_path,
+        output_path=output_path,
+        metrics_path=metrics_path,
+        state_dir=tmp_path / "state",
+        config=config,
+        annotation_source="oracle",
+        cloud_safe_dataset_path=cloud_safe_path,
+    )
+
+    serialized = output_path.read_text(encoding="utf-8")
+    cloud_serialized = cloud_safe_path.read_text(encoding="utf-8")
+    assert "David" not in serialized
+    assert "Amex" not in serialized
+    assert "8865" not in serialized
+    assert "David" not in cloud_serialized
+    assert "Amex" not in cloud_serialized
+    assert "8865" not in cloud_serialized
+    assert "public option" in cloud_serialized
+
+
+
+def test_public_memory_runner_keeps_pl1_public_preferences(tmp_path):
+    input_path = tmp_path / "input.jsonl"
+    output_path = tmp_path / "public.jsonl"
+    metrics_path = tmp_path / "metrics.json"
+    cloud_safe_path = tmp_path / "cloud-safe.jsonl"
+    input_path.write_text(
+        json.dumps(
+            {
+                "uuid": "u1",
+                "dialogues": [
+                    {
+                        "role": "user",
+                        "content": "I prefer vegetarian restaurants for team dinners.",
+                        "privacy_info": [
+                            {
+                                "original_text": "vegetarian restaurants",
+                                "privacy_type": "Preference",
+                                "privacy_level": "PL1",
+                            }
+                        ],
+                    }
+                ],
+                "questions": [
+                    {
+                        "question": "What kind of restaurants does the user prefer?",
+                        "answer": "The user prefers vegetarian restaurants.",
+                        "evidence": "The user said they prefer vegetarian restaurants.",
+                        "all_options": ["vegetarian restaurants", "steakhouses"],
+                    }
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config = {
+        "public_memory": {
+            "policy": {"pl1": "public", "pl2": "public_abstract", "pl3": "local_only", "pl4": "drop"},
+            "selector": {},
+            "leakage_budget": {"minimum_token_reduction": -1.0},
+        }
+    }
+
+    compile_dataset(
+        input_path=input_path,
+        output_path=output_path,
+        metrics_path=metrics_path,
+        state_dir=tmp_path / "state",
+        config=config,
+        annotation_source="oracle",
+        cloud_safe_dataset_path=cloud_safe_path,
+    )
+
+    serialized = output_path.read_text(encoding="utf-8")
+    cloud_serialized = cloud_safe_path.read_text(encoding="utf-8")
+    assert "vegetarian restaurants" in serialized
+    assert "vegetarian restaurants" in cloud_serialized

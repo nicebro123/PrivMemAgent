@@ -9,12 +9,18 @@ The deterministic research baseline is now implemented:
 - least-specific feasible representation selection under utility, leakage, and
   token budgets;
 - scoped alias rotation and local query-time hydration;
-- raw-free provenance, revocation hooks, context minimization, and leakage
-  auditing.
+- cloud-safe default export, local-only debug metadata, revocation hooks,
+  context minimization, memory-control and ephemeral-request filtering, and
+  deterministic adversarial leakage auditing.
 
-This is not yet the final learned method. Downstream memory QA, held-out
-attribute/linkage attackers, and learned selector training remain required
-before making the full paper claim described below.
+This is not yet the final learned method. The deterministic audit now covers
+exact recovery, source identifiers, sensitive metadata, linkability markers,
+membership markers, canary exposure, and prompt-injection strings, with per-user
+scoping for partial artifacts. The compiler also has a conservative residual
+scrubber for known same-user sensitive tokens. Downstream memory QA, utility
+recovery after conservative scrubbing, held-out learned attackers, and learned
+selector training remain required before making the full paper claim described
+below.
 
 ## Problem Statement
 
@@ -168,7 +174,9 @@ typed-pseudonymization path remains available as the legacy baseline.
 
 ### Utility
 
-- MemPrivacy-Bench and PersonaMem-v2 memory QA.
+- MemPrivacy-Bench and PersonaMem-v2 memory QA. The current proxy evaluator
+  resolves MCQ answer labels against `all_options` before computing
+  non-private answer-token recall.
 - Mem0, LangMem, and Memobase.
 - Basic, temporal, dynamic-update, aggregation, implicit-inference, and
   adversarial questions reported separately.
@@ -226,5 +234,10 @@ upper bound rather than as an end-to-end system result.
 4. Add abstraction candidates and a utility-constrained selector.
 5. Add attacker-aware training only after deterministic baselines are stable.
 
-Steps 1-4 are implemented. Step 5 and end-to-end memory-system utility
+Steps 1-4 are implemented, and the deterministic adversarial audit now covers
+most roadmap attack surfaces as rule-based checks. A budget-sweep tool now
+produces utility/leakage/minimality summaries across `max_public_tokens` values
+for Pareto-frontier analysis. The current safety-first residual scrubber can
+reduce utility on some partial PersonaMem-v2 runs, so Step 5, learned held-out
+attackers, learned utility-aware selection, and end-to-end memory-system utility
 experiments are pending. See [Preliminary results](PRELIMINARY_RESULTS.md).

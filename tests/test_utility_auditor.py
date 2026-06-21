@@ -99,3 +99,97 @@ def test_utility_proxy_uses_highest_level_for_conflicting_labels(tmp_path):
     assert report.exactly_referenced_private_facts == 1
     assert report.policy_eligible_private_facts == 0
     assert report.oracle_type_local_recoverability is None
+
+
+
+def test_utility_proxy_resolves_multiple_choice_answer_labels(tmp_path):
+    router = ScopedAliasRouter(
+        str(tmp_path / "aliases.db"),
+        key_path=str(tmp_path / "aliases.key"),
+    )
+    compiler = PublicMemoryCompiler(
+        PrivacyPolicy.default(),
+        router,
+        ProvenanceStore(str(tmp_path / "provenance.db")),
+    )
+    record = compiler.compile(
+        "The user likes naturally leavened bread with heritage grains.",
+        [],
+        RoutingContext(
+            user_id="u1",
+            message_id="m1",
+            turn_id="t1",
+            session_id="s1",
+            task_id="task1",
+        ),
+    )
+
+    report = UtilityProxyAuditor().audit(
+        [record],
+        {
+            "u1": [
+                {
+                    "answer": "(c)",
+                    "all_options": [
+                        "(a) The user prefers painting landscapes.",
+                        "(b) The user prefers woodworking projects.",
+                        "(c) The user likes naturally leavened bread with heritage grains.",
+                    ],
+                }
+            ]
+        },
+        {"u1": []},
+        router,
+    )
+
+    assert report.non_private_answer_token_recall == 1.0
+    compiler.close()
+
+
+def test_utility_proxy_detects_private_fact_inside_selected_option(tmp_path):
+    router = ScopedAliasRouter(
+        str(tmp_path / "aliases.db"),
+        key_path=str(tmp_path / "aliases.key"),
+    )
+    compiler = PublicMemoryCompiler(
+        PrivacyPolicy.default(),
+        router,
+        ProvenanceStore(str(tmp_path / "provenance.db")),
+    )
+    item = {
+        "original_text": "+1-617-492-7843",
+        "privacy_type": "Phone Number",
+        "privacy_level": "PL2",
+    }
+    record = compiler.compile(
+        "My phone number is +1-617-492-7843.",
+        [item],
+        RoutingContext(
+            user_id="u1",
+            message_id="m1",
+            turn_id="t1",
+            session_id="s1",
+            task_id="task1",
+        ),
+    )
+
+    report = UtilityProxyAuditor().audit(
+        [record],
+        {
+            "u1": [
+                {
+                    "answer": "(a)",
+                    "all_options": [
+                        "(a) +1-617-492-7843",
+                        "(b) +1-617-294-7843",
+                    ],
+                }
+            ]
+        },
+        {"u1": [item]},
+        router,
+    )
+
+    assert report.exactly_referenced_private_facts == 1
+    assert report.oracle_type_local_recoverability == 1.0
+    compiler.close()

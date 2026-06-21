@@ -7,6 +7,9 @@ from typing import Dict, Iterable, Mapping, Optional, Sequence
 from src.alias_router import ScopedAliasRouter
 from src.public_memory_compiler import CompiledMemory
 
+_OPTION_LABEL_RE = re.compile(r"^\s*\(?([A-Za-z])\)?[.)]?\s*$")
+_OPTION_PREFIX_RE = re.compile(r"^\s*\(?([A-Za-z])\)\s*(.*)$")
+
 
 def _tokens(text: str) -> set[str]:
     raw_tokens = re.findall(r"[A-Za-z0-9_]+|[^\x00-\x7F]", text.lower())
@@ -46,6 +49,26 @@ class UtilityProxyReport:
     non_private_answer_token_recall: Optional[float]
     pl4_local_retention_rate: float
     proxy_only: bool = True
+
+
+def _strip_option_prefix(option: str) -> tuple[Optional[str], str]:
+    match = _OPTION_PREFIX_RE.match(option)
+    if not match:
+        return None, option.strip()
+    return match.group(1).lower(), match.group(2).strip()
+
+
+def _answer_text(question: Mapping) -> str:
+    answer = str(question.get("answer", "")).strip()
+    match = _OPTION_LABEL_RE.match(answer)
+    if not match:
+        return answer
+    selected_label = match.group(1).lower()
+    for option in question.get("all_options", []) or []:
+        label, text = _strip_option_prefix(str(option))
+        if label == selected_label:
+            return text or answer
+    return answer
 
 
 class UtilityProxyAuditor:
@@ -116,7 +139,7 @@ class UtilityProxyAuditor:
 
             for question in questions:
                 question_count += 1
-                answer = str(question.get("answer", ""))
+                answer = _answer_text(question)
                 evidence = str(question.get("evidence", ""))
                 evaluation_text = f"{answer}\n{evidence}"
                 referenced = [

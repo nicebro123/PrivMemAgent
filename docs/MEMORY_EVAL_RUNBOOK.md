@@ -59,13 +59,16 @@ python -m evaluation.eval_mem0 \
 ```
 
 Repeat both commands with `evaluation.eval_langmem`. Run Memobase only after its
-preflight passes.
+preflight passes. The minimal-public `--no-mask` path is guarded: runners reject
+unmasked inputs unless they have cloud-safe shape, preventing accidental raw
+benchmark uploads to cloud memory systems. Use `--allow-unsafe-no-mask` only for
+trusted local debugging or the explicit raw-memory baseline.
 
 ## Full Oracle Upper-Bound Matrix
 
 For each dataset and memory system, run:
 
-- raw memory: `--no-mask`;
+- raw memory: `--no-mask --allow-unsafe-no-mask`;
 - persistent typed pseudonyms: `--mask --mask-mode type_specific`;
 - complete masking: `--mask --mask-mode complete`;
 - minimal public memory: compile a cloud-safe benchmark and run `--no-mask`.
@@ -92,5 +95,19 @@ Report:
 - accuracy and valid-answer accuracy by question type;
 - exact-value recovery, PL4 retention, and attribute/linkage attacks;
 - public tokens and memory records per user;
+- budget-sweep Pareto summaries from `tools.public_memory_budget_sweep`;
 - raw, typed, complete-mask, and minimal-public paired deltas;
 - model annotations separately from oracle annotations.
+
+For a deterministic minimality sweep before expensive memory-system runs:
+
+```bash
+python -m tools.public_memory_budget_sweep \
+  --input data/personamem_v2_testset.jsonl \
+  --output-dir evaluation/results/persona_budget_sweep \
+  --summary-output evaluation/results/persona_budget_sweep_summary.json \
+  --annotation-source oracle \
+  --user-limit 5 \
+  --minimum-token-reduction -1.0 \
+  --budget 16 --budget 64 --budget 128
+```

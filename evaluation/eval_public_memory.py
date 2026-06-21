@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from collections import Counter
 from contextlib import nullcontext
 from dataclasses import asdict
@@ -66,6 +67,64 @@ def _build_compiler(config: dict, state_dir: Path) -> PublicMemoryCompiler:
     )
 
 
+_RESIDUAL_STOPWORDS = {
+    "this",
+    "that",
+    "with",
+    "from",
+    "have",
+    "will",
+    "your",
+    "我的",
+    "你的",
+    "我们",
+    "这个",
+    "那个",
+}
+
+
+def _residual_sensitive_terms(privacy_items: Iterable[Mapping[str, str]]) -> List[str]:
+    terms = []
+    for item in privacy_items:
+        level = str(item.get("privacy_level", ""))
+        original = str(item.get("original_text", "")).strip()
+        if not original:
+            continue
+        if level not in {"PL2", "PL3", "PL4"}:
+            continue
+        if len(original) >= 4:
+            terms.append(original)
+        for token in re.findall(r"[A-Za-z][A-Za-z0-9_@.-]{3,}|\d{4,}|[\u4e00-\u9fff]{2,}", original):
+            normalized = token.strip(".,;:!?()[]{}<>，。；：！？（）【】")
+            if len(normalized) < 2 or normalized.lower() in _RESIDUAL_STOPWORDS:
+                continue
+            terms.append(normalized)
+    return sorted(set(terms), key=len, reverse=True)
+
+
+def _sentence_units(text: str) -> List[str]:
+    return [
+        match.group(0).strip()
+        for match in re.finditer(r".+?(?:[.!?。！？；;]+[\"'”’]*|$)(?:\s+|$)", text)
+        if match.group(0).strip()
+    ]
+
+
+def _contains_residual_term(unit: str, terms: Iterable[str]) -> bool:
+    for term in terms:
+        if term and term in unit:
+            return True
+    return False
+
+
+def _scrub_residual_sensitive_text(text: str, privacy_items: Iterable[Mapping[str, str]]) -> str:
+    terms = _residual_sensitive_terms(privacy_items)
+    if not terms or not text:
+        return text
+    kept = [unit for unit in _sentence_units(text) if not _contains_residual_term(unit, terms)]
+    return " ".join(kept).strip()
+
+
 def _build_auditor(config: dict, enforce_memory_reduction: bool = True) -> LeakageAuditor:
     budget = config["public_memory"].get("leakage_budget", {})
     return LeakageAuditor(
@@ -82,36 +141,54 @@ def _build_auditor(config: dict, enforce_memory_reduction: bool = True) -> Leaka
     )
 
 
-def _serialize_record(record: CompiledMemory) -> dict:
-    return {
-        "user_id": record.user_id,
-        "message_id": record.message_id,
-        "source_fingerprint": record.source_fingerprint,
+def _serialize_record(
+    record: CompiledMemory,
+    anonymize_ids: bool = True,
+    include_debug_metadata: bool = False,
+    user_alias: Optional[str] = None,
+    message_alias: Optional[str] = None,
+) -> dict:
+    user_id = record.user_id
+    message_id = record.message_id
+    if anonymize_ids:
+        user_id = user_alias or f"User-{record.source_fingerprint[:12]}"
+        message_id = message_alias or f"Message-{record.source_fingerprint[:16]}"
+    payload = {
+        "user_id": user_id,
+        "message_id": message_id,
         "public_text": record.public_text,
         "policy_version": record.policy_version,
         "source_tokens": record.source_tokens,
         "public_tokens": record.public_tokens,
         "token_reduction": record.token_reduction,
-        "items": [
-            {
-                "source_item_index": item.source_item_index,
-                "source_fingerprint": item.source_fingerprint,
-                "privacy_level": item.privacy_level,
-                "privacy_type": item.privacy_type,
-                "route_action": item.decision.action.value,
-                "rule_id": item.decision.rule_id,
-                "reason": item.decision.reason,
-                "representation_type": item.representation_type,
-                "public_value": item.public_value,
-                "utility_score": item.utility_score,
-                "leakage_score": item.leakage_score,
-                "alias_scope": (item.alias_scope.value if item.alias_scope else None),
-                "scope_id": item.scope_id,
-                "provenance_id": item.provenance_id,
-            }
-            for item in record.items
-        ],
     }
+    if not include_debug_metadata:
+        return payload
+    payload.update(
+        {
+            "source_fingerprint": record.source_fingerprint,
+            "items": [
+                {
+                    "source_item_index": item.source_item_index,
+                    "source_fingerprint": item.source_fingerprint,
+                    "privacy_level": item.privacy_level,
+                    "privacy_type": item.privacy_type,
+                    "route_action": item.decision.action.value,
+                    "rule_id": item.decision.rule_id,
+                    "reason": item.decision.reason,
+                    "representation_type": item.representation_type,
+                    "public_value": item.public_value,
+                    "utility_score": item.utility_score,
+                    "leakage_score": item.leakage_score,
+                    "alias_scope": (item.alias_scope.value if item.alias_scope else None),
+                    "scope_id": item.scope_id,
+                    "provenance_id": item.provenance_id,
+                }
+                for item in record.items
+            ],
+        }
+    )
+    return payload
 
 
 def _compile_cloud_field(
@@ -119,6 +196,7 @@ def _compile_cloud_field(
     privacy_items: Iterable[Mapping[str, str]],
     compiler: PublicMemoryCompiler,
     context: RoutingContext,
+    residual_privacy_items: Iterable[Mapping[str, str]] = (),
 ) -> tuple[str, CompiledMemory, List[dict]]:
     applicable = [
         dict(item)
@@ -131,6 +209,21 @@ def _compile_cloud_field(
         context=context,
         strict=True,
     )
+    scrubbed_text = _scrub_residual_sensitive_text(
+        compiled.public_text,
+        list(applicable) + list(residual_privacy_items),
+    )
+    if scrubbed_text != compiled.public_text:
+        compiled = CompiledMemory(
+            user_id=compiled.user_id,
+            message_id=compiled.message_id,
+            source_fingerprint=compiled.source_fingerprint,
+            public_text=scrubbed_text,
+            items=compiled.items,
+            policy_version=compiled.policy_version,
+            source_tokens=compiled.source_tokens,
+            public_tokens=0 if not scrubbed_text else len(re.findall(r"[A-Za-z0-9_]+|[^\x00-\x7F]", scrubbed_text)),
+        )
     return compiled.public_text, compiled, applicable
 
 
@@ -166,6 +259,7 @@ def _sanitize_questions(
                     session_id=f"{user_id}:evaluation",
                     task_id=f"{user_id}:question:{question_index}",
                 ),
+                residual_privacy_items=privacy_items,
             )
             sanitized[field_name] = public_text
             audit_records.append(record)
@@ -186,6 +280,7 @@ def _sanitize_questions(
                     session_id=f"{user_id}:evaluation",
                     task_id=f"{user_id}:question:{question_index}",
                 ),
+                residual_privacy_items=privacy_items,
             )
             sanitized_options.append(public_text)
             audit_records.append(record)
@@ -209,6 +304,8 @@ def compile_dataset(
     exact_required_types: Iterable[str] = (),
     consented_reversible_types: Iterable[str] = (),
     cloud_safe_dataset_path: Optional[Path] = None,
+    anonymize_output_ids: bool = True,
+    include_debug_output_metadata: bool = False,
 ) -> dict:
     state_dir.mkdir(parents=True, exist_ok=True)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -330,6 +427,30 @@ def compile_dataset(
                         )
                         continue
 
+                    scrubbed_public_text = _scrub_residual_sensitive_text(
+                        compiled.public_text,
+                        known_items,
+                    )
+                    if scrubbed_public_text != compiled.public_text:
+                        compiled = CompiledMemory(
+                            user_id=compiled.user_id,
+                            message_id=compiled.message_id,
+                            source_fingerprint=compiled.source_fingerprint,
+                            public_text=scrubbed_public_text,
+                            items=compiled.items,
+                            policy_version=compiled.policy_version,
+                            source_tokens=compiled.source_tokens,
+                            public_tokens=(
+                                0
+                                if not scrubbed_public_text
+                                else len(
+                                    re.findall(
+                                        r"[A-Za-z0-9_]+|[^\x00-\x7F]",
+                                        scrubbed_public_text,
+                                    )
+                                )
+                            ),
+                        )
                     records.append(compiled)
                     source_items[message_id] = items
                     route_counts.update(item.decision.action.value for item in compiled.items)
@@ -337,7 +458,21 @@ def compile_dataset(
                         item.representation_type for item in compiled.items
                     )
                     destination.write(
-                        json.dumps(_serialize_record(compiled), ensure_ascii=False) + "\n"
+                        json.dumps(
+                            _serialize_record(
+                                compiled,
+                                anonymize_ids=anonymize_output_ids,
+                                include_debug_metadata=include_debug_output_metadata,
+                                user_alias=(
+                                    f"User-{compiler.alias_router.fingerprint(user_id)[:12]}"
+                                ),
+                                message_alias=(
+                                    f"Message-{compiler.alias_router.fingerprint(message_id)[:16]}"
+                                ),
+                            ),
+                            ensure_ascii=False,
+                        )
+                        + "\n"
                     )
                     sanitized_message = {
                         key: value
@@ -447,6 +582,22 @@ def parse_args() -> argparse.Namespace:
         type=float,
         help="override the configured long-term-memory reduction gate",
     )
+    parser.add_argument(
+        "--raw-output-ids",
+        action="store_true",
+        help=(
+            "write source user/message IDs to the public-memory JSONL. "
+            "Disabled by default because public artifacts are intended to be raw-free."
+        ),
+    )
+    parser.add_argument(
+        "--debug-output-metadata",
+        action="store_true",
+        help=(
+            "include source fingerprints, privacy categories, route decisions, scopes, "
+            "and provenance IDs in the public-memory JSONL. Keep disabled for cloud artifacts."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -474,6 +625,8 @@ def main() -> None:
             if args.cloud_safe_dataset_output
             else None
         ),
+        anonymize_output_ids=not args.raw_output_ids,
+        include_debug_output_metadata=args.debug_output_metadata,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

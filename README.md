@@ -332,13 +332,40 @@ python -m evaluation.eval_public_memory \
   --annotation-source oracle
 ```
 
-The JSONL output contains public representations and raw-free provenance only.
-Exact local values remain in the encrypted state directory; PL4 values are not
-retained. Use `src/public_memory_config.yaml` to configure policy, alias scopes,
-selection budgets, context minimization, and leakage gates.
+For the tiny smoke file, the default long-term reduction gate can be stricter
+than the sample is meant to satisfy. Use an explicit smoke-only override when
+checking plumbing rather than compression quality:
+
+```bash
+python -m evaluation.eval_public_memory \
+  --input data/memory_eval_smoke.jsonl \
+  --output evaluation/results/minimal_public_smoke.jsonl \
+  --metrics-output evaluation/results/minimal_public_smoke_metrics.json \
+  --state-dir evaluation/results/minimal_public_smoke_state \
+  --cloud-safe-dataset-output evaluation/results/minimal_public_smoke_benchmark.jsonl \
+  --annotation-source oracle \
+  --minimum-token-reduction -1.0
+```
+
+The JSONL output is cloud-safe by default: it contains the public text, stable
+anonymized user/message aliases, policy version, and coarse token statistics.
+Source user/message identifiers are anonymized by default; use `--raw-output-ids`
+only for trusted local debugging. Internal fingerprints, privacy categories,
+route decisions, alias scopes, and provenance IDs are also withheld by default;
+use `--debug-output-metadata` only for local audits. Exact local values remain
+in the encrypted state directory; PL4 values are not retained and their entire
+source sentence is removed from public text. Use `src/public_memory_config.yaml`
+to configure policy, alias scopes, selection budgets, context minimization, and
+leakage gates.
 
 The optional cloud-safe dataset preserves the benchmark schema while protecting
-dialogues, questions, options, answers, evidence, and user identifiers. It can
+dialogues, questions, options, answers, evidence, and user identifiers. Memory
+control requests such as `Please forget ...` and one-off task requests such as
+`Could you explain ...` are treated as local control flow, not public memory
+facts, so they are removed from generated public/cloud-safe artifacts. The
+utility proxy resolves multiple-choice answer labels such as
+`(b)` through `all_options` before measuring non-private answer-token recall, so
+PersonaMem style MCQ labels are not treated as semantic answer content. It can
 be passed to the existing memory runners without a second masking layer:
 
 ```bash
@@ -347,8 +374,59 @@ python -m evaluation.eval_mem0 \
   --no-mask --mcq
 ```
 
-Keep the generated state directory on the trusted edge. Do not upload it with
-the cloud-safe JSONL.
+The memory-system runners refuse `--no-mask` unless the input looks like a
+cloud-safe public-memory dataset with anonymized `User-*` identifiers and no raw
+privacy/debug metadata. Use `--allow-unsafe-no-mask` only for trusted local
+debugging of deliberately raw inputs. Keep the generated state directory on the
+trusted edge. Do not upload it with the cloud-safe JSONL.
+
+Run the deterministic adversarial leakage audit before sending generated
+artifacts to a cloud memory system:
+
+```bash
+python -m tools.adversarial_audit \
+  --source data/memory_eval_smoke.jsonl \
+  --artifact evaluation/results/minimal_public_smoke.jsonl \
+  --artifact evaluation/results/minimal_public_smoke_benchmark.jsonl \
+  --report evaluation/results/adversarial_audit_smoke.json
+```
+
+When auditing artifacts generated with `eval_public_memory --user-limit N`, pass
+`--source-user-limit N` to keep the attack source scope aligned with the
+generated artifact. Otherwise secrets from users outside the generated subset can
+collide with ordinary public text and create misleading cross-user findings.
+
+This deterministic audit checks exact secret recovery, PL4/canary exposure,
+source user identifiers, sensitive privacy-type metadata, linkability metadata,
+verbatim membership markers, and prompt-injection strings in public/cloud-safe
+JSONL. It scopes checks by artifact user order so partial `--user-limit` runs do
+not confuse different users' secrets. Alias reuse, non-sensitive membership
+markers, and sensitive category words are reported as warnings; direct leakage
+and debug metadata are failures. The compiler also applies a conservative
+user-level residual scrubber to remove known sensitive tokens that survive span
+replacement in dialogues or QA fields. This is still a deterministic baseline,
+not a replacement for held-out learned attribute, linkage, membership, or
+prompt-injection attackers.
+
+For minimality and Pareto-frontier analysis, sweep public-memory token budgets
+and collect utility/leakage metrics in one JSON summary:
+
+```bash
+python -m tools.public_memory_budget_sweep \
+  --input data/memory_eval_smoke.jsonl \
+  --output-dir evaluation/results/budget_sweep_smoke \
+  --summary-output evaluation/results/budget_sweep_smoke_summary.json \
+  --annotation-source oracle \
+  --minimum-token-reduction -1.0 \
+  --budget 16 \
+  --budget 64 \
+  --budget 128
+```
+
+Each budget run writes public memory, optional cloud-safe benchmark data,
+`metrics.json`, and `adversarial_audit.json`. The summary includes token
+reduction, utility proxy recall, exact/PL4 leakage, adversarial failures, and
+warning counts for plotting the utility/privacy/minimality trade-off.
 
 Evaluation logic:
 1. feed dialogues turn-by-turn into the memory system (optionally with MemPrivacy masking)

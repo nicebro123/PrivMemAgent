@@ -24,6 +24,7 @@ from tenacity import (
 )
 from tqdm import tqdm
 
+from evaluation.cloud_safe_guard import enforce_no_mask_input_safety
 from evaluation.privacy_masking import (
     PrivacyStore,
     collect_user_privacy_items,
@@ -543,6 +544,15 @@ def parse_args():
         choices=("generic", "type_specific", "complete"),
         default="type_specific",
     )
+    parser.add_argument(
+        "--allow-unsafe-no-mask",
+        action="store_true",
+        help=(
+            "allow --no-mask with a raw/non-cloud-safe input. Use only for trusted "
+            "local debugging; cloud memory evaluations should use eval_public_memory "
+            "--cloud-safe-dataset-output instead."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -552,6 +562,12 @@ if __name__ == "__main__":
     mp.set_start_method("spawn", force=True)
     args = parse_args()
     os.environ["MEMPRIVACY_ANNOTATION_SOURCE"] = args.annotation_source
+    enforce_no_mask_input_safety(
+        input_path=args.input,
+        is_mask=args.mask,
+        allow_unsafe_no_mask=args.allow_unsafe_no_mask,
+        user_limit=args.user_num,
+    )
 
     start_time = time.time()
 

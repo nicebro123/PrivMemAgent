@@ -36,6 +36,23 @@ def _normalize_public_text(text: str) -> str:
     return text.strip()
 
 
+def _sentence_bounds(text: str, start: int, end: int) -> tuple[int, int]:
+    left = start
+    while left > 0 and text[left - 1] not in ".!?。！？;；\n":
+        left -= 1
+    while left < start and text[left].isspace():
+        left += 1
+
+    right = end
+    while right < len(text) and text[right] not in ".!?。！？;；\n":
+        right += 1
+    if right < len(text):
+        right += 1
+    while right < len(text) and text[right].isspace():
+        right += 1
+    return left, right
+
+
 @dataclass(frozen=True)
 class CompiledItem:
     source_item_index: int
@@ -318,18 +335,55 @@ class PublicMemoryCompiler:
                 start = message_text.find(original, start)
                 if start < 0:
                     break
-                replacements.append((start, start + len(original), replacement, len(original)))
+                end = start + len(original)
+                if compiled.decision.action in {RouteAction.DROP, RouteAction.LOCAL_ONLY}:
+                    sentence_start, sentence_end = _sentence_bounds(message_text, start, end)
+                    replacements.append(
+                        (
+                            sentence_start,
+                            sentence_end,
+                            "",
+                            max(len(original), sentence_end - sentence_start),
+                        )
+                    )
+                else:
+                    replacements.append((start, end, replacement, len(original)))
                 start += len(original)
 
         replacements.sort(key=lambda item: (-item[3], item[0]))
         selected_replacements = []
         for start, end, replacement, _ in replacements:
-            if any(
-                start < selected_end and end > selected_start
-                for selected_start, selected_end, _ in selected_replacements
-            ):
+            overlapping = [
+                index
+                for index, (selected_start, selected_end, selected_replacement) in enumerate(
+                    selected_replacements
+                )
+                if start < selected_end and end > selected_start
+            ]
+            if not overlapping:
+                selected_replacements.append((start, end, replacement))
                 continue
-            selected_replacements.append((start, end, replacement))
+
+            if replacement == "" and all(
+                selected_replacements[index][2] == "" for index in overlapping
+            ):
+                merged_start = min(
+                    [start] + [selected_replacements[index][0] for index in overlapping]
+                )
+                merged_end = max(
+                    [end] + [selected_replacements[index][1] for index in overlapping]
+                )
+                for index in sorted(overlapping, reverse=True):
+                    selected_replacements.pop(index)
+                selected_replacements.append((merged_start, merged_end, ""))
+            elif replacement == "":
+                for index in sorted(overlapping, reverse=True):
+                    selected_start, selected_end, selected_replacement = (
+                        selected_replacements[index]
+                    )
+                    if selected_replacement == "":
+                        selected_replacements.pop(index)
+                selected_replacements.append((start, end, replacement))
 
         public_text = message_text
         for start, end, replacement in sorted(selected_replacements, reverse=True):

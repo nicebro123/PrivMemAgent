@@ -62,3 +62,39 @@ def test_minimizer_preserves_trailing_quote():
     text = 'The user said: "My preferred activity is birdwatching."'
 
     assert minimizer.minimize(text, role="user").text == text
+
+
+def test_minimizer_drops_memory_control_forget_requests():
+    minimizer = ContextMinimizer()
+    text = (
+        "Please forget that I enjoy casual cycling around the neighborhood. "
+        "I now prefer swimming on weekends."
+    )
+
+    result = minimizer.minimize(text, role="user")
+
+    assert "forget" not in result.text.lower()
+    assert "casual cycling" not in result.text.lower()
+    assert "prefer swimming" in result.text
+
+
+def test_minimizer_drops_ephemeral_task_requests():
+    minimizer = ContextMinimizer()
+
+    result = minimizer.minimize(
+        "Could you also suggest a few alternative metaphors for this paragraph?",
+        role="user",
+    )
+
+    assert result.text == ""
+
+
+def test_minimizer_keeps_explicit_long_term_preference_not_request():
+    minimizer = ContextMinimizer()
+
+    result = minimizer.minimize(
+        "I prefer quiet vegetarian restaurants for team dinners.",
+        role="user",
+    )
+
+    assert "vegetarian restaurants" in result.text
