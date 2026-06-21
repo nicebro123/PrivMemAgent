@@ -143,6 +143,9 @@ including `shards/`, `extractor_shards/`, per-shard logs, merged
 `public_metrics.json`, `adversarial_audit.json`, and `manifest.json`. The
 launcher defaults to `--skip-existing`, so completed dataset directories are not
 rerun unless `--no-skip-existing` is passed.
+It also defaults to `--continue-on-audit-failure`: adversarial-audit leakage is
+recorded as an experimental result in `adversarial_audit.json` and the audit log,
+but later datasets still run.
 
 The script writes model predictions, public-memory artifacts, cloud-safe
 benchmarks, state directories, and adversarial audit reports under

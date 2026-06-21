@@ -21,6 +21,7 @@ def test_parse_csv_and_default_gpus():
     args = parse_args(["--dry-run"])
 
     assert args.gpus == "0,1,2,3"
+    assert args.continue_on_audit_failure is True
     assert _parse_csv("0, 1,,2") == ["0", "1", "2"]
 
 

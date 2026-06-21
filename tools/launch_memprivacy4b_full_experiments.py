@@ -216,16 +216,31 @@ def _memory_system_commands(
     return [[sys.executable, "-m", f"evaluation.eval_{system}", *common] for system in systems]
 
 
-def _run_logged(command: Sequence[str], log_path: Path, *, env: dict[str, str], dry_run: bool) -> None:
+def _run_logged(
+    command: Sequence[str],
+    log_path: Path,
+    *,
+    env: dict[str, str],
+    dry_run: bool,
+    check: bool = True,
+) -> int:
     print("$", _quote(command), flush=True)
     print(f"# log: {log_path}", flush=True)
     if dry_run:
-        return
+        return 0
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("w", encoding="utf-8") as log:
         log.write("$ " + _quote(command) + "\n")
         log.flush()
-        subprocess.run(command, cwd=REPO_ROOT, env=env, stdout=log, stderr=subprocess.STDOUT, check=True)
+        completed = subprocess.run(
+            command,
+            cwd=REPO_ROOT,
+            env=env,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            check=check,
+        )
+    return completed.returncode
 
 
 def _start_logged(
@@ -388,12 +403,19 @@ def _run_dataset(args: argparse.Namespace, spec: DatasetSpec, gpus: Sequence[str
         env=post_env,
         dry_run=args.dry_run,
     )
-    _run_logged(
+    audit_return_code = _run_logged(
         _audit_command(spec, dataset_dir),
         log_dir / "adversarial_audit.log",
         env=post_env,
         dry_run=args.dry_run,
+        check=not args.continue_on_audit_failure,
     )
+    if audit_return_code != 0 and args.continue_on_audit_failure:
+        print(
+            f"# adversarial audit returned {audit_return_code} for {spec.name}; "
+            "continuing because --continue-on-audit-failure is enabled",
+            flush=True,
+        )
     for command in _memory_system_commands(args, spec, dataset_dir):
         name = command[2].replace(".", "_")
         _run_logged(command, log_dir / f"{name}.log", env=post_env, dry_run=args.dry_run)
@@ -419,6 +441,15 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--skip-existing", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--check-gpus", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--max-gpu-memory-mb", type=int, default=1024)
+    parser.add_argument(
+        "--continue-on-audit-failure",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "keep launching later datasets when adversarial audit reports leakage. "
+            "The audit report and non-zero return code remain in the logs."
+        ),
+    )
     parser.add_argument("--run-memory-systems", action="store_true")
     parser.add_argument(
         "--memory-system",
