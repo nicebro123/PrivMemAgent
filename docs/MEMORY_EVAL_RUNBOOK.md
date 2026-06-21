@@ -40,11 +40,11 @@ python -m tools.preflight_memory_eval --system langmem --probe-openai
 
 The key file must stay outside git and mode `0600`. DeepSeek official chat
 models work for `memory_llm`, `answer_llm`, and `judgment_llm`, but the official
-API does not provide an OpenAI-compatible embeddings endpoint for
-`text-embedding-3-small`. Mem0 and LangMem therefore still need a separate
-embedding provider before full memory-system runs; public-memory compilation,
-budget sweeps, adversarial audits, and direct chat/judge calls do not need local
-GPUs.
+API does not provide an OpenAI-compatible embeddings endpoint. The DeepSeek
+profile therefore uses a local BGE-M3 embedding checkpoint at
+`/mnt/infini-data/test/quan_space/codespace/memprivate/models/bge-m3` with 1024
+dimensions. Set `embedding_model.device` to `cuda:0` if you want faster local
+embedding; CPU is the default to avoid occupying GPUs during API-bound runs.
 
 ## Infrastructure Smoke
 

@@ -1,9 +1,11 @@
 openai_base_url: "$OPENAI_BASE_URL"
 openai_api_key: "$OPENAI_API_KEY"
 
-embedding_model: 
-  model: "text-embedding-3-small"
-  dimensions: 1536
+embedding_model:
+  provider: "huggingface"
+  model: "/mnt/infini-data/test/quan_space/codespace/memprivate/models/bge-m3"
+  dimensions: 1024
+  device: "cpu"
 
 memory_llm:
   model: "deepseek-chat"

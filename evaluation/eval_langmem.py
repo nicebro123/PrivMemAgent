@@ -5,7 +5,7 @@ import os
 import time
 from multiprocessing import Pool
 from pathlib import Path, PurePath
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from langchain_core.messages.utils import count_tokens_approximately, trim_messages
 
@@ -107,12 +107,30 @@ def pre_model_hook(state: dict) -> dict:
     return {"llm_input_messages": trimmed}
 
 
+def _build_embedding_function() -> Callable[[list[str]], list[list[float]]] | str:
+    provider = EMBEDDING_MODEL.get("provider", "openai")
+    if provider != "huggingface":
+        return f"{provider}:{EMBEDDING_MODEL['model']}"
+
+    from sentence_transformers import SentenceTransformer
+
+    model = SentenceTransformer(
+        EMBEDDING_MODEL["model"],
+        device=EMBEDDING_MODEL.get("device", "cpu"),
+    )
+
+    def embed(texts: list[str]) -> list[list[float]]:
+        return model.encode(texts, convert_to_numpy=True).tolist()
+
+    return embed
+
+
 class LangMem:
     def __init__(self):
         self.store = InMemoryStore(
             index={
                 "dims": EMBEDDING_MODEL["dimensions"],
-                "embed": f"openai:{EMBEDDING_MODEL['model']}",
+                "embed": _build_embedding_function(),
             }
         )
         self.checkpointer = MemorySaver()  # Checkpoint graph state

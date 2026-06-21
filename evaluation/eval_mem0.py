@@ -66,6 +66,26 @@ def _annotation_source() -> str:
     return os.getenv("MEMPRIVACY_ANNOTATION_SOURCE", "model")
 
 
+def _build_embedder_config() -> dict:
+    embedding_config = _config.get("embedding_model", {})
+    provider = embedding_config.get("provider", "openai")
+    if provider == "huggingface":
+        return {
+            "provider": "huggingface",
+            "config": {
+                "model": embedding_config["model"],
+                "embedding_dims": embedding_config.get("dimensions"),
+                "model_kwargs": {"device": embedding_config.get("device", "cpu")},
+            },
+        }
+    return {
+        "provider": provider,
+        "config": {
+            "model": embedding_config["model"],
+        },
+    }
+
+
 def load_mem0_config(user_id: str, db_path: str):
 
     mem0_config = {
@@ -76,12 +96,7 @@ def load_mem0_config(user_id: str, db_path: str):
                 "path": db_path,
             },
         },
-        "embedder": {
-            "provider": "openai",
-            "config": {
-                "model": _config["embedding_model"]["model"],
-            },
-        },
+        "embedder": _build_embedder_config(),
         "llm": {
             "provider": "openai",
             "config": {
